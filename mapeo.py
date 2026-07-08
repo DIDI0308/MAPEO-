@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 import io
-import plotly.express as px
-from datetime import datetime
+import folium
+from folium import plugins
+import streamlit.components.v1 as components
 
-# Configuración de interfaz
-st.set_page_config(page_title="Módulo de Ruteo y Georreferenciación", layout="wide")
-st.title("Procesamiento de Ruteo y Georreferenciación")
+# Configuración de interfaz ejecutiva
+st.set_page_config(page_title="Módulo de Ruteo Estratégico", layout="wide")
+st.title("Procesamiento de Ruteo y Generación de Mapas")
 
 URL_CLIENTES = "https://docs.google.com/spreadsheets/d/1zIllojDvh23QUOP8afJbxD66I5Ly6tgY/export?format=xlsx"
 
@@ -18,7 +19,7 @@ archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", 
 
 if archivo_subido is not None:
     try:
-        with st.spinner("Procesando datos y cruzando coordenadas..."):
+        with st.spinner("Procesando datos y estructurando mapa interactivo..."):
             # 1. Extracción y Limpieza
             df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
             col_ruta = df_fox.columns[0]
@@ -45,14 +46,12 @@ if archivo_subido is not None:
                 'Y': 'LATITUD'
             }, inplace=True)
 
-            # Preparación para el mapa interno
+            # Preparación para el mapa
             df_final['LATITUD'] = pd.to_numeric(df_final['LATITUD'], errors='coerce')
             df_final['LONGITUD'] = pd.to_numeric(df_final['LONGITUD'], errors='coerce')
             df_mapa = df_final.dropna(subset=['LATITUD', 'LONGITUD'])
 
             # --- PRESENTACIÓN EN PORTAL ---
-            
-            # Panel de Métricas
             col1, col2, col3 = st.columns(3)
             col1.metric("Registros Iniciales", len(df_fox))
             col2.metric("Base Limpia", len(df_ruteo))
@@ -60,67 +59,93 @@ if archivo_subido is not None:
             
             st.divider()
             
-            # Tablas (Mantenidas como solicitaste)
             col_izq, col_der = st.columns([1, 1.5])
-            
             with col_izq:
                 st.subheader("Resumen Operativo")
                 st.dataframe(df_resumen, use_container_width=True, hide_index=True)
-                
             with col_der:
                 st.subheader("Base de Ruteo Consolidada")
                 st.dataframe(df_final, use_container_width=True, hide_index=True)
             
             st.divider()
 
-            # Exportación a Excel
-            buffer = io.BytesIO()
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+            # --- GENERACIÓN DEL MAPA FOLIUM (OPTIMIZADO PARA CELULAR) ---
+            st.subheader("Mapa Interactivo para Ayudantes")
             
-            # --- SECCIÓN GOOGLE MY MAPS ---
-            st.subheader("🔗 Exportación a Google My Maps")
-            
-            fecha_hoy = datetime.now().strftime("%d/%m/%Y")
-            nombre_mapa = f"MAPA({fecha_hoy})"
-            
-            st.info(
-                f"**Instrucciones para My Maps:**\n\n"
-                f"1. Descarga la base mapeada usando el botón de abajo.\n"
-                f"2. Haz clic en este enlace para abrir **[Google My Maps](https://www.google.com/maps/d/)** y selecciona **'Crear un nuevo mapa'**.\n"
-                f"3. Copia y pega este nombre para tu mapa: **`{nombre_mapa}`**\n"
-                f"4. Importa el Excel descargado. Elige `LATITUD` y `LONGITUD` cuando te pida las coordenadas, y agrupa el estilo por la columna `CAM`."
-            )
-            
-            st.download_button(
-                label="📥 1. Descargar Excel Mapeado",
-                data=buffer.getvalue(),
-                file_name="Base_Final_Rutas.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary"
-            )
-            st.markdown(f"[➡️ 2. Abrir Google My Maps](https://www.google.com/maps/d/)")
-
-            st.divider()
-
-            # Mapa Integrado de respaldo
-            st.subheader("Vista Previa Rápida (Mapa Integrado)")
             if not df_mapa.empty:
-                fig = px.scatter_mapbox(
-                    df_mapa, 
-                    lat="LATITUD", 
-                    lon="LONGITUD", 
-                    color=col_cam, 
-                    hover_name=col_cliente,
-                    hover_data=[col_ruta, "DIRECCION", "NUMERO"],
-                    zoom=11,
-                    height=600,
-                    mapbox_style="carto-positron"
-                )
-                fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-                st.plotly_chart(fig, use_container_width=True)
+                centro_lat = df_mapa['LATITUD'].mean()
+                centro_lon = df_mapa['LONGITUD'].mean()
+                
+                # Mapa base
+                mapa_rutas = folium.Map(location=[centro_lat, centro_lon], zoom_start=13, tiles="CartoDB positron")
+                
+                # 🔴 NUEVO: Botón de GPS para el celular del ayudante
+                plugins.LocateControl(
+                    strings={"title": "Mostrar mi ubicación actual", "popup": "Estás aquí"},
+                    drawCircle=True,
+                    drawMarker=True,
+                    position='topleft'
+                ).add_to(mapa_rutas)
+                
+                colores_disponibles = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'cadetblue', 'darkgreen', 'darkblue', 'pink']
+                camiones_unicos = df_mapa[col_cam].unique()
+                diccionario_colores = {cam: colores_disponibles[i % len(colores_disponibles)] for i, cam in enumerate(camiones_unicos)}
+                
+                for index, row in df_mapa.iterrows():
+                    # Tarjeta optimizada para pantallas pequeñas
+                    info_popup = f"""
+                    <div style='font-family: Arial; font-size: 15px; width: 200px;'>
+                        <b style='color: {diccionario_colores.get(row[col_cam], 'gray')};'>CAMIÓN: {row[col_cam]}</b><br>
+                        <b>Cliente:</b> {row[col_cliente]}<br>
+                        <b>Ruta:</b> {row[col_ruta]}<br>
+                        <hr style='margin: 5px 0;'>
+                        <b>Dir:</b> {row['DIRECCION']}<br>
+                        <b>Tel:</b> {row['NUMERO']}
+                    </div>
+                    """
+                    
+                    folium.Marker(
+                        location=[row['LATITUD'], row['LONGITUD']],
+                        popup=folium.Popup(info_popup, max_width=250),
+                        tooltip=f"Cliente: {row[col_cliente]}",
+                        icon=folium.Icon(color=diccionario_colores.get(row[col_cam], 'gray'), icon='truck', prefix='fa')
+                    ).add_to(mapa_rutas)
+                
+                html_mapa = mapa_rutas.get_root().render()
+                components.html(html_mapa, height=500)
+                
+                st.divider()
+                
+                # --- BOTONES DE DESCARGA ---
+                st.subheader("Archivos de Operación")
+                col_btn1, col_btn2 = st.columns(2)
+                
+                with col_btn1:
+                    st.download_button(
+                        label="📱 Descargar Mapa para Celulares (.html)",
+                        data=html_mapa,
+                        file_name="Mapa_Rutas_Ayudantes.html",
+                        mime="text/html",
+                        type="primary",
+                        use_container_width=True
+                    )
+                    st.caption("Envía este archivo por WhatsApp a los choferes/ayudantes. Podrán ver su ubicación GPS en vivo y los clientes.")
+                
+                with col_btn2:
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+                    
+                    st.download_button(
+                        label="📥 Descargar Base Consolidada (.xlsx)",
+                        data=buffer.getvalue(),
+                        file_name="Base_Final_Rutas.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+
             else:
-                st.warning("No se encontraron coordenadas válidas para graficar.")
+                st.warning("No se encontraron coordenadas válidas para generar el mapa.")
 
     except Exception as e:
-        st.error(f"Error en el procesamiento. Detalle técnico: {e}")
+        st.error(f"Error en el procesamiento. Verifique la estructura del archivo. Detalle técnico: {e}")
