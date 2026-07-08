@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
+from datetime import datetime
 
+# Configuración de interfaz
 st.set_page_config(page_title="Módulo de Ruteo y Georreferenciación", layout="wide")
 st.title("Procesamiento de Ruteo y Georreferenciación")
 
@@ -16,10 +18,9 @@ archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", 
 
 if archivo_subido is not None:
     try:
-        with st.spinner("Procesando datos y generando visualizaciones..."):
+        with st.spinner("Procesando datos y cruzando coordenadas..."):
             # 1. Extracción y Limpieza
             df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
-            
             col_ruta = df_fox.columns[0]
             col_cliente = df_fox.columns[1]
             col_cam = df_fox.columns[2]
@@ -44,7 +45,7 @@ if archivo_subido is not None:
                 'Y': 'LATITUD'
             }, inplace=True)
 
-            # 4. Preparación de datos para el mapa
+            # Preparación para el mapa interno
             df_final['LATITUD'] = pd.to_numeric(df_final['LATITUD'], errors='coerce')
             df_final['LONGITUD'] = pd.to_numeric(df_final['LONGITUD'], errors='coerce')
             df_mapa = df_final.dropna(subset=['LATITUD', 'LONGITUD'])
@@ -54,33 +55,12 @@ if archivo_subido is not None:
             # Panel de Métricas
             col1, col2, col3 = st.columns(3)
             col1.metric("Registros Iniciales", len(df_fox))
-            col2.metric("Base Limpia (Final)", len(df_ruteo))
+            col2.metric("Base Limpia", len(df_ruteo))
             col3.metric("Puntos Georreferenciados", len(df_mapa))
             
             st.divider()
-
-            # Mapa Integrado (Reemplazo de My Maps)
-            st.subheader("Mapa de Distribución por Camión")
-            if not df_mapa.empty:
-                fig = px.scatter_mapbox(
-                    df_mapa, 
-                    lat="LATITUD", 
-                    lon="LONGITUD", 
-                    color=col_cam, # Agrupación solicitada en la imagen
-                    hover_name=col_cliente,
-                    hover_data=[col_ruta, "DIRECCION", "NUMERO"],
-                    zoom=11,
-                    height=600,
-                    mapbox_style="carto-positron"
-                )
-                fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("No se encontraron coordenadas válidas para graficar.")
-
-            st.divider()
             
-            # Tablas Restauradas
+            # Tablas (Mantenidas como solicitaste)
             col_izq, col_der = st.columns([1, 1.5])
             
             with col_izq:
@@ -92,19 +72,55 @@ if archivo_subido is not None:
                 st.dataframe(df_final, use_container_width=True, hide_index=True)
             
             st.divider()
-            
+
             # Exportación a Excel
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
             
+            # --- SECCIÓN GOOGLE MY MAPS ---
+            st.subheader("🔗 Exportación a Google My Maps")
+            
+            fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+            nombre_mapa = f"MAPA({fecha_hoy})"
+            
+            st.info(
+                f"**Instrucciones para My Maps:**\n\n"
+                f"1. Descarga la base mapeada usando el botón de abajo.\n"
+                f"2. Haz clic en este enlace para abrir **[Google My Maps](https://www.google.com/maps/d/)** y selecciona **'Crear un nuevo mapa'**.\n"
+                f"3. Copia y pega este nombre para tu mapa: **`{nombre_mapa}`**\n"
+                f"4. Importa el Excel descargado. Elige `LATITUD` y `LONGITUD` cuando te pida las coordenadas, y agrupa el estilo por la columna `CAM`."
+            )
+            
             st.download_button(
-                label="Descargar Archivo Maestro (.xlsx)",
+                label="📥 1. Descargar Excel Mapeado",
                 data=buffer.getvalue(),
                 file_name="Base_Final_Rutas.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 type="primary"
             )
+            st.markdown(f"[➡️ 2. Abrir Google My Maps](https://www.google.com/maps/d/)")
+
+            st.divider()
+
+            # Mapa Integrado de respaldo
+            st.subheader("Vista Previa Rápida (Mapa Integrado)")
+            if not df_mapa.empty:
+                fig = px.scatter_mapbox(
+                    df_mapa, 
+                    lat="LATITUD", 
+                    lon="LONGITUD", 
+                    color=col_cam, 
+                    hover_name=col_cliente,
+                    hover_data=[col_ruta, "DIRECCION", "NUMERO"],
+                    zoom=11,
+                    height=600,
+                    mapbox_style="carto-positron"
+                )
+                fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No se encontraron coordenadas válidas para graficar.")
 
     except Exception as e:
         st.error(f"Error en el procesamiento. Detalle técnico: {e}")
