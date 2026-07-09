@@ -4,148 +4,177 @@ import io
 import folium
 from folium import plugins
 import streamlit.components.v1 as components
+import colorsys
 
 # Configuración de interfaz ejecutiva
-st.set_page_config(page_title="Módulo de Ruteo Estratégico", layout="wide")
-st.title("Procesamiento de Ruteo y Generación de Mapas")
+st.set_page_config(page_title="Ruteo y Georreferenciación", layout="wide", initial_sidebar_state="expanded")
 
-URL_CLIENTES = "https://docs.google.com/spreadsheets/d/1zIllojDvh23QUOP8afJbxD66I5Ly6tgY/export?format=xlsx"
+# Convertimos tu enlace de Google Drive en un enlace de descarga directa
+URL_DRIVE = "https://docs.google.com/spreadsheets/d/1zIllojDvh23QUOP8afJbxD66I5Ly6tgY/export?format=xlsx"
+
+# Función para generar colores infinitos (supera el límite de 20 rutas)
+def generar_colores_infinitos(n):
+    colores = []
+    for i in range(n):
+        # Usamos la proporción áurea para que colores adyacentes sean muy distintos
+        h = (i * 0.618033988749895) % 1.0 
+        r, g, b = colorsys.hsv_to_rgb(h, 0.8, 0.9)
+        colores.append(f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}")
+    return colores
 
 @st.cache_data
 def cargar_base_clientes():
-    return pd.read_excel(URL_CLIENTES, sheet_name="Clientes", usecols=["CLIID", "CLIDOM", "TELEFONO", "X", "Y"])
+    return pd.read_excel(URL_DRIVE, sheet_name="Clientes", usecols=["CLIID", "CLIDOM", "TELEFONO", "X", "Y"])
 
-archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"])
+@st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+def cargar_rutas_hoy():
+    return pd.read_excel(URL_DRIVE, sheet_name="Rutas_Hoy")
 
-if archivo_subido is not None:
+# --- MENÚ LATERAL ---
+modo = st.sidebar.radio("Modo de Operación", ["🛡️ Centro de Control (Admin)", "🚚 Mapa de Ruta (Ayudantes)"])
+
+# ==========================================
+# MODO ADMINISTRADOR (OFICINA)
+# ==========================================
+if modo == "🛡️ Centro de Control (Admin)":
+    st.title("Procesamiento de Ruteo (Centro de Control)")
+    st.info("Sube el archivo FOX diario para generar la base consolidada.")
+    
+    archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"])
+
+    if archivo_subido is not None:
+        try:
+            with st.spinner("Procesando datos y cruzando coordenadas..."):
+                # 1. Extracción y Limpieza
+                df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
+                col_ruta = df_fox.columns[0]
+                col_cliente = df_fox.columns[1]
+                col_cam = df_fox.columns[2]
+                
+                df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
+                df_filtrado = df_fox[~df_fox[col_cam].isin(["NO", "#N/D"])]
+                df_ruteo = df_filtrado.drop_duplicates(subset=[col_ruta, col_cliente, col_cam])
+                
+                # 2. Generación de Tabla Resumen
+                df_resumen = df_ruteo.groupby([col_cam, col_ruta])[col_cliente].count().reset_index()
+                df_resumen.rename(columns={col_cliente: "N° de PDVs a Visitar"}, inplace=True)
+                
+                # 3. Cruce con Base de Coordenadas
+                df_clientes = cargar_base_clientes()
+                df_merged = pd.merge(df_ruteo, df_clientes, left_on=col_cliente, right_on='CLIID', how='left')
+                
+                df_final = df_merged[[col_ruta, col_cliente, col_cam, 'CLIDOM', 'TELEFONO', 'X', 'Y']]
+                df_final.rename(columns={
+                    'CLIDOM': 'DIRECCION',
+                    'TELEFONO': 'NUMERO',
+                    'X': 'LONGITUD',
+                    'Y': 'LATITUD'
+                }, inplace=True)
+
+                # --- PRESENTACIÓN TABLAS ---
+                col1, col2 = st.columns([1, 1.5])
+                with col1:
+                    st.subheader("Resumen Operativo")
+                    st.dataframe(df_resumen, use_container_width=True, hide_index=True)
+                with col2:
+                    st.subheader("Base de Ruteo Consolidada")
+                    st.dataframe(df_final, use_container_width=True, hide_index=True)
+                
+                st.divider()
+
+                # --- EXPORTACIÓN ---
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+                
+                st.success("✅ Procesamiento Exitoso. Sigue los pasos para actualizar a los ayudantes:")
+                st.markdown("""
+                1. Descarga el Excel con el botón de abajo.
+                2. Abre tu archivo de Google Sheets en Drive.
+                3. Pega los datos en la pestaña llamada **`Rutas_Hoy`** (créala si no existe).
+                4. ¡Listo! Los ayudantes ya pueden ver el mapa en su celular.
+                """)
+                
+                st.download_button(
+                    label="📥 Descargar Excel Final",
+                    data=buffer.getvalue(),
+                    file_name="Base_Final_Rutas.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary"
+                )
+
+        except Exception as e:
+            st.error(f"Error en el procesamiento: {e}")
+
+# ==========================================
+# MODO AYUDANTE (CELULAR)
+# ==========================================
+elif modo == "🚚 Mapa de Ruta (Ayudantes)":
+    # Diseño optimizado para pantallas pequeñas
+    st.markdown("<h2 style='text-align: center;'>Mapa Operativo</h2>", unsafe_allow_html=True)
+    
     try:
-        with st.spinner("Procesando datos y estructurando mapa interactivo..."):
-            # 1. Extracción y Limpieza
-            df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
-            col_ruta = df_fox.columns[0]
-            col_cliente = df_fox.columns[1]
-            col_cam = df_fox.columns[2]
+        with st.spinner("Cargando mapa en vivo..."):
+            df_mapa = cargar_rutas_hoy()
             
-            df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
-            df_filtrado = df_fox[~df_fox[col_cam].isin(["NO", "#N/D"])]
-            df_ruteo = df_filtrado.drop_duplicates(subset=[col_ruta, col_cliente, col_cam])
-            
-            # 2. Generación de Tabla Resumen
-            df_resumen = df_ruteo.groupby([col_cam, col_ruta])[col_cliente].count().reset_index()
-            df_resumen.rename(columns={col_cliente: "N° de PDVs a Visitar"}, inplace=True)
-            
-            # 3. Cruce con Base de Coordenadas
-            df_clientes = cargar_base_clientes()
-            df_merged = pd.merge(df_ruteo, df_clientes, left_on=col_cliente, right_on='CLIID', how='left')
-            
-            df_final = df_merged[[col_ruta, col_cliente, col_cam, 'CLIDOM', 'TELEFONO', 'X', 'Y']]
-            df_final.rename(columns={
-                'CLIDOM': 'DIRECCION',
-                'TELEFONO': 'NUMERO',
-                'X': 'LONGITUD',
-                'Y': 'LATITUD'
-            }, inplace=True)
-
-            # Preparación para el mapa
-            df_final['LATITUD'] = pd.to_numeric(df_final['LATITUD'], errors='coerce')
-            df_final['LONGITUD'] = pd.to_numeric(df_final['LONGITUD'], errors='coerce')
-            df_mapa = df_final.dropna(subset=['LATITUD', 'LONGITUD'])
-
-            # --- PRESENTACIÓN EN PORTAL ---
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Registros Iniciales", len(df_fox))
-            col2.metric("Base Limpia", len(df_ruteo))
-            col3.metric("Puntos Georreferenciados", len(df_mapa))
-            
-            st.divider()
-            
-            col_izq, col_der = st.columns([1, 1.5])
-            with col_izq:
-                st.subheader("Resumen Operativo")
-                st.dataframe(df_resumen, use_container_width=True, hide_index=True)
-            with col_der:
-                st.subheader("Base de Ruteo Consolidada")
-                st.dataframe(df_final, use_container_width=True, hide_index=True)
-            
-            st.divider()
-
-            # --- GENERACIÓN DEL MAPA FOLIUM (OPTIMIZADO PARA CELULAR) ---
-            st.subheader("Mapa Interactivo para Ayudantes")
+            # Limpieza de coordenadas para evitar errores del mapa
+            df_mapa['LATITUD'] = pd.to_numeric(df_mapa['LATITUD'], errors='coerce')
+            df_mapa['LONGITUD'] = pd.to_numeric(df_mapa['LONGITUD'], errors='coerce')
+            df_mapa = df_mapa.dropna(subset=['LATITUD', 'LONGITUD'])
             
             if not df_mapa.empty:
+                # Nombres dinámicos de columnas basados en el formato de salida
+                col_cam = "CAM" if "CAM" in df_mapa.columns else df_mapa.columns[2]
+                col_cliente = "CLIENTE" if "CLIENTE" in df_mapa.columns else df_mapa.columns[1]
+                col_ruta = "RUTA" if "RUTA" in df_mapa.columns else df_mapa.columns[0]
+                
                 centro_lat = df_mapa['LATITUD'].mean()
                 centro_lon = df_mapa['LONGITUD'].mean()
                 
-                # Mapa base
-                mapa_rutas = folium.Map(location=[centro_lat, centro_lon], zoom_start=13, tiles="CartoDB positron")
+                mapa_rutas = folium.Map(location=[centro_lat, centro_lon], zoom_start=14, tiles="CartoDB positron")
                 
-                # 🔴 NUEVO: Botón de GPS para el celular del ayudante
+                # GPS del Celular
                 plugins.LocateControl(
-                    strings={"title": "Mostrar mi ubicación actual", "popup": "Estás aquí"},
-                    drawCircle=True,
-                    drawMarker=True,
-                    position='topleft'
+                    strings={"title": "Centrar en mi ubicación", "popup": "Estás aquí"},
+                    drawCircle=True, drawMarker=True, position='topleft'
                 ).add_to(mapa_rutas)
                 
-                colores_disponibles = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'cadetblue', 'darkgreen', 'darkblue', 'pink']
+                # Asignación de colores infinitos (hexadecimal)
                 camiones_unicos = df_mapa[col_cam].unique()
-                diccionario_colores = {cam: colores_disponibles[i % len(colores_disponibles)] for i, cam in enumerate(camiones_unicos)}
+                paleta_colores = generar_colores_infinitos(len(camiones_unicos))
+                diccionario_colores = dict(zip(camiones_unicos, paleta_colores))
                 
                 for index, row in df_mapa.iterrows():
-                    # Tarjeta optimizada para pantallas pequeñas
+                    color_hex = diccionario_colores.get(row[col_cam], '#333333')
+                    
                     info_popup = f"""
-                    <div style='font-family: Arial; font-size: 15px; width: 200px;'>
-                        <b style='color: {diccionario_colores.get(row[col_cam], 'gray')};'>CAMIÓN: {row[col_cam]}</b><br>
+                    <div style='font-family: Arial; font-size: 16px; width: 220px;'>
+                        <b style='color: {color_hex}; font-size: 18px;'>CAMIÓN: {row[col_cam]}</b><br>
                         <b>Cliente:</b> {row[col_cliente]}<br>
                         <b>Ruta:</b> {row[col_ruta]}<br>
                         <hr style='margin: 5px 0;'>
                         <b>Dir:</b> {row['DIRECCION']}<br>
-                        <b>Tel:</b> {row['NUMERO']}
+                        <a href="tel:{row['NUMERO']}">📞 Llamar: {row['NUMERO']}</a>
                     </div>
                     """
                     
-                    folium.Marker(
+                    # Usamos CircleMarker: Soporta infinitos colores, es rápido y no satura el celular
+                    folium.CircleMarker(
                         location=[row['LATITUD'], row['LONGITUD']],
+                        radius=8, # Tamaño del círculo
+                        color='white', # Borde
+                        weight=1.5,
+                        fill_color=color_hex,
+                        fill_opacity=0.9,
                         popup=folium.Popup(info_popup, max_width=250),
-                        tooltip=f"Cliente: {row[col_cliente]}",
-                        icon=folium.Icon(color=diccionario_colores.get(row[col_cam], 'gray'), icon='truck', prefix='fa')
+                        tooltip=f"Tocar para ver: {row[col_cliente]}"
                     ).add_to(mapa_rutas)
                 
                 html_mapa = mapa_rutas.get_root().render()
-                components.html(html_mapa, height=500)
+                components.html(html_mapa, height=600)
                 
-                st.divider()
-                
-                # --- BOTONES DE DESCARGA ---
-                st.subheader("Archivos de Operación")
-                col_btn1, col_btn2 = st.columns(2)
-                
-                with col_btn1:
-                    st.download_button(
-                        label="📱 Descargar Mapa para Celulares (.html)",
-                        data=html_mapa,
-                        file_name="Mapa_Rutas_Ayudantes.html",
-                        mime="text/html",
-                        type="primary",
-                        use_container_width=True
-                    )
-                    st.caption("Envía este archivo por WhatsApp a los choferes/ayudantes. Podrán ver su ubicación GPS en vivo y los clientes.")
-                
-                with col_btn2:
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
-                    
-                    st.download_button(
-                        label="📥 Descargar Base Consolidada (.xlsx)",
-                        data=buffer.getvalue(),
-                        file_name="Base_Final_Rutas.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-
             else:
-                st.warning("No se encontraron coordenadas válidas para generar el mapa.")
-
+                st.warning("El administrador aún no ha cargado las rutas de hoy.")
+    
     except Exception as e:
-        st.error(f"Error en el procesamiento. Verifique la estructura del archivo. Detalle técnico: {e}")
+        st.error(f"Error cargando las rutas. Verifique que la hoja 'Rutas_Hoy' exista en el Drive. Detalle: {e}")
