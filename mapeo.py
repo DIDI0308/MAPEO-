@@ -7,6 +7,7 @@ import streamlit.components.v1 as components
 import zlib
 import base64
 from datetime import datetime
+import zipfile
 
 # Configuración de interfaz ejecutiva
 st.set_page_config(page_title="Módulo de Ruteo Estratégico", layout="wide")
@@ -165,17 +166,49 @@ if archivo_subido is not None:
                     f"4. Importe el Excel, elija `LATITUD` y `LONGITUD`, y agrupe por `CAM`."
                 )
                 
-                buffer = io.BytesIO()
-                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                    df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+                # --- MODIFICACIÓN: Lógica de división de archivos si hay > 20 rutas ---
+                rutas_unicas = df_final[col_ruta].unique()
                 
-                st.download_button(
-                    label="📥 Descargar Base para My Maps (.xlsx)",
-                    data=buffer.getvalue(),
-                    file_name="Base_Final_Rutas.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+                if len(rutas_unicas) > 20:
+                    st.warning(f"Se detectaron {len(rutas_unicas)} rutas. El sistema dividirá los archivos (máx. 20 rutas por archivo).")
+                    
+                    # Crear archivo ZIP en memoria
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                        for i in range(0, len(rutas_unicas), 20):
+                            # Seleccionar el bloque de 20 rutas
+                            rutas_bloque = rutas_unicas[i:i+20]
+                            df_bloque = df_final[df_final[col_ruta].isin(rutas_bloque)]
+                            
+                            # Crear el Excel para este bloque en memoria
+                            excel_buffer = io.BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                df_bloque.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+                            
+                            # Nombrar y guardar el archivo dentro del ZIP
+                            nombre_archivo = f"Base_Final_Rutas_Parte_{i//20 + 1}.xlsx"
+                            zip_file.writestr(nombre_archivo, excel_buffer.getvalue())
+                    
+                    st.download_button(
+                        label="📥 Descargar Archivos ZIP (Divididos)",
+                        data=zip_buffer.getvalue(),
+                        file_name="Bases_MyMaps_Divididas.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
+                else:
+                    # Comportamiento normal (20 rutas o menos)
+                    buffer = io.BytesIO()
+                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                        df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+                    
+                    st.download_button(
+                        label="📥 Descargar Base para My Maps (.xlsx)",
+                        data=buffer.getvalue(),
+                        file_name="Base_Final_Rutas.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
 
     except Exception as e:
         st.error(f"Falla en el procesamiento de los datos. Detalle técnico: {e}")
