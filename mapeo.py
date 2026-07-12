@@ -12,22 +12,34 @@ import zipfile
 # Configuración de interfaz ejecutiva
 st.set_page_config(page_title="Módulo de Ruteo Estratégico", layout="wide")
 
+# --- LECTURA SEGURA DEL LINK (Evita el "Error running app" en cualquier versión) ---
+data_encoded = None
+try:
+    if hasattr(st, "query_params") and "data" in st.query_params:
+        data_encoded = st.query_params["data"]
+    elif hasattr(st, "experimental_get_query_params") and "data" in st.experimental_get_query_params():
+        data_encoded = st.experimental_get_query_params()["data"][0]
+except Exception:
+    pass
+
 # --- VISTA OPERATIVA (Para el Ayudante en Ruta) ---
-if "data" in st.query_params:
-    data_encoded = st.query_params["data"]
-    
+if data_encoded:
     try:
+        # Se agrega padding por si WhatsApp recorta el link
+        data_encoded += "=" * ((4 - len(data_encoded) % 4) % 4)
+        
         decoded_bytes = base64.urlsafe_b64decode(data_encoded)
         decompressed = zlib.decompress(decoded_bytes).decode('utf-8')
         df_ruta = pd.read_json(io.StringIO(decompressed))
         
         st.title("Mapa Operativo de Rutas")
         
-        camiones_disponibles = sorted(df_ruta['cam'].unique())
+        # Blindaje contra valores nulos al ordenar
+        camiones_disponibles = sorted([str(x) for x in df_ruta['cam'].unique() if pd.notna(x)])
         camion_seleccionado = st.selectbox("Seleccione su unidad:", ["Visión Global"] + camiones_disponibles)
         
         if camion_seleccionado != "Visión Global":
-            df_mostrar = df_ruta[df_ruta['cam'] == camion_seleccionado]
+            df_mostrar = df_ruta[df_ruta['cam'].astype(str) == camion_seleccionado]
         else:
             df_mostrar = df_ruta
             
@@ -93,7 +105,7 @@ archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", 
 if archivo_subido is not None:
     try:
         with st.spinner("Procesando matriz de datos..."):
-            # Procesamiento inalterado
+            # PROCESAMIENTO INTACTO (No ralentizado)
             df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
             col_ruta = df_fox.columns[0]
             col_cliente = df_fox.columns[1]
@@ -126,7 +138,7 @@ if archivo_subido is not None:
             
             st.divider()
 
-            # --- NUEVA SECCIÓN DE EXPORTACIÓN Y LINKS ---
+            # --- SECCIÓN DE EXPORTACIÓN Y LINKS ---
             col_export_1, col_export_2 = st.columns(2)
 
             with col_export_1:
@@ -166,26 +178,22 @@ if archivo_subido is not None:
                     f"4. Importe el Excel, elija `LATITUD` y `LONGITUD`, y agrupe por `CAM`."
                 )
                 
-                # --- MODIFICACIÓN: Lógica de división de archivos si hay > 20 rutas ---
+                # --- DIVISIÓN DE ARCHIVOS SI HAY > 20 RUTAS ---
                 rutas_unicas = df_final[col_ruta].unique()
                 
                 if len(rutas_unicas) > 20:
                     st.warning(f"Se detectaron {len(rutas_unicas)} rutas. El sistema dividirá los archivos (máx. 20 rutas por archivo).")
                     
-                    # Crear archivo ZIP en memoria
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                         for i in range(0, len(rutas_unicas), 20):
-                            # Seleccionar el bloque de 20 rutas
                             rutas_bloque = rutas_unicas[i:i+20]
                             df_bloque = df_final[df_final[col_ruta].isin(rutas_bloque)]
                             
-                            # Crear el Excel para este bloque en memoria
                             excel_buffer = io.BytesIO()
                             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                                 df_bloque.to_excel(writer, index=False, sheet_name='Base_Mapeada')
                             
-                            # Nombrar y guardar el archivo dentro del ZIP
                             nombre_archivo = f"Base_Final_Rutas_Parte_{i//20 + 1}.xlsx"
                             zip_file.writestr(nombre_archivo, excel_buffer.getvalue())
                     
@@ -197,7 +205,6 @@ if archivo_subido is not None:
                         use_container_width=True
                     )
                 else:
-                    # Comportamiento normal (20 rutas o menos)
                     buffer = io.BytesIO()
                     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                         df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
