@@ -114,7 +114,6 @@ with col_head2:
 def cargar_base_clientes():
     return pd.read_excel(URL_CLIENTES, sheet_name="Clientes", usecols=["CLIID", "CLIDOM", "TELEFONO", "X", "Y"])
 
-# Función mejorada para generar imágenes formales SIN sobreposición
 def generar_imagen_tabla(df, titulo):
     fig, ax = plt.subplots(figsize=(14, len(df) * 0.4 + 1.5))
     ax.axis('tight')
@@ -148,14 +147,12 @@ def generar_imagen_tabla(df, titulo):
 archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"], on_change=reset_maestro)
 
 if archivo_subido is not None:
-    # 🔴 BOTÓN DE ACCIONAR 1
     if st.button("▶️ Procesar Archivo Maestro", type="primary"):
         st.session_state.procesar_maestro = True
         
     if st.session_state.procesar_maestro:
         try:
             with st.spinner("Procesando matriz de datos..."):
-                # --- PROCESAMIENTO DE RUTEO INTACTO ---
                 df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
                 col_ruta = df_fox.columns[0]
                 col_cliente = df_fox.columns[1]
@@ -165,7 +162,6 @@ if archivo_subido is not None:
                 df_filtrado = df_fox[~df_fox[col_cam].isin(["NO", "#N/D"])]
                 df_ruteo = df_filtrado.drop_duplicates(subset=[col_ruta, col_cliente, col_cam])
                 
-                # Guardamos la asignación de Cliente->Camión en memoria para el módulo Eventual
                 st.session_state.df_cruce_fox = df_ruteo[[col_cliente, col_cam]].drop_duplicates(subset=[col_cliente])
                 st.session_state.col_cliente_fox = col_cliente
                 st.session_state.col_cam_fox = col_cam
@@ -193,7 +189,6 @@ if archivo_subido is not None:
                 
                 st.divider()
 
-                # --- SECCIÓN DE EXPORTACIÓN Y LINKS (Múltiples Excel, sin ZIP) ---
                 col_export_1, col_export_2 = st.columns(2)
 
                 with col_export_1:
@@ -270,7 +265,6 @@ if archivo_subido is not None:
 
                 st.divider()
 
-                # --- SECCIÓN: VENTANAS HORARIAS FIJAS ---
                 st.header("🕒 Ventanas Horarias Fijas")
                 
                 try:
@@ -329,7 +323,6 @@ st.header("📅 Procesamiento de Ventanas Horarias Eventuales")
 archivo_zip = st.file_uploader("Cargue el archivo .zip de VH Eventuales", type=["zip"], on_change=reset_zip)
 
 if archivo_zip is not None:
-    # 🔴 BOTÓN DE ACCIONAR 2
     if st.button("▶️ Procesar Archivo ZIP", type="primary"):
         st.session_state.procesar_zip = True
         
@@ -346,11 +339,9 @@ if archivo_zip is not None:
                         else:
                             df_vh_ev = pd.read_excel(f)
                     
-                    # Identificación de columnas (A = Fecha, B = Cliente)
                     col_fecha = df_vh_ev.columns[0]
                     col_cliente_ev = df_vh_ev.columns[1]
                     
-                    # 🔴 CRUCE DE DATOS CON FOX (Para obtener el código de camión)
                     if 'df_cruce_fox' in st.session_state:
                         df_cruce = st.session_state.df_cruce_fox
                         col_fox_cli = st.session_state.col_cliente_fox
@@ -358,24 +349,19 @@ if archivo_zip is not None:
                         
                         df_vh_ev = pd.merge(df_vh_ev, df_cruce, left_on=col_cliente_ev, right_on=col_fox_cli, how='left')
                         
-                        # Limpieza de columnas duplicadas
                         if col_cliente_ev != col_fox_cli:
                             df_vh_ev = df_vh_ev.drop(columns=[col_fox_cli])
                         
-                        # Renombrar para ubicarlo fácilmente
                         df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
                     else:
                         st.warning("⚠️ Procese primero el 'Archivo Maestro de Ruteo' arriba para poder cruzar los camiones asignados.")
 
-                    # Normalización de la columna fecha para el calendario
                     df_vh_ev = df_vh_ev.dropna(subset=[col_fecha])
                     df_vh_ev['Fecha_Limpia'] = pd.to_datetime(df_vh_ev[col_fecha], errors='coerce').dt.date
                     
                     st.subheader("Filtro Operativo")
-                    # 🔴 CALENDARIO INTERACTIVO
                     fecha_calendario = st.date_input("Seleccione la fecha a consultar:")
                     
-                    # 🔴 BOTÓN DE ACCIONAR 3
                     if st.button("▶️ Procesar Fecha Seleccionada"):
                         st.session_state.procesar_fecha = True
                         st.session_state.fecha_activa = fecha_calendario
@@ -387,8 +373,29 @@ if archivo_zip is not None:
                         st.success(f"Mostrando {len(df_filtrado_ev)} registros correspondientes al {fecha_elegida.strftime('%d/%m/%Y')}")
                         st.dataframe(df_filtrado_ev, use_container_width=True)
                         
+                        # --- NUEVO: Exportación de Imagen omitiendo columnas D, E, F ---
+                        if not df_filtrado_ev.empty:
+                            df_imagen_ev = df_filtrado_ev.copy()
+                            
+                            # Asegurarnos de que el DataFrame tenga al menos 6 columnas antes de intentar borrar
+                            if len(df_imagen_ev.columns) >= 6:
+                                # Las columnas D, E, F corresponden a los índices 3, 4 y 5
+                                columnas_a_omitir = df_imagen_ev.columns[3:6]
+                                df_imagen_ev = df_imagen_ev.drop(columns=columnas_a_omitir)
+                            
+                            img_ev = generar_imagen_tabla(df_imagen_ev, f"Ventanas Horarias Eventuales - {fecha_elegida.strftime('%d/%m/%Y')}")
+                            
+                            st.download_button(
+                                label="🖼️ Descargar Reporte (Sin columnas D, E, F) como Imagen",
+                                data=img_ev.getvalue(),
+                                file_name=f"VH_Eventuales_{fecha_elegida}.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                        
                 else:
                     st.warning("El archivo ZIP no contiene ningún archivo válido (.csv o .xlsx).")
                     
         except Exception as e:
             st.error(f"Error al procesar el archivo comprimido. Detalle técnico: {e}")
+            
