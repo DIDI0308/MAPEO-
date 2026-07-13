@@ -10,8 +10,23 @@ from datetime import datetime
 import zipfile
 import matplotlib.pyplot as plt
 
-# Configuración de interfaz ejecutiva
+# --- CONFIGURACIÓN E INICIALIZACIÓN DE ESTADOS ---
 st.set_page_config(page_title="Módulo de Ruteo Estratégico", layout="wide")
+
+# Variables de estado para los botones "Procesar"
+if 'procesar_maestro' not in st.session_state:
+    st.session_state.procesar_maestro = False
+if 'procesar_zip' not in st.session_state:
+    st.session_state.procesar_zip = False
+if 'procesar_fecha' not in st.session_state:
+    st.session_state.procesar_fecha = False
+
+def reset_maestro():
+    st.session_state.procesar_maestro = False
+
+def reset_zip():
+    st.session_state.procesar_zip = False
+    st.session_state.procesar_fecha = False
 
 # --- LECTURA SEGURA DEL LINK ---
 data_encoded = None
@@ -101,7 +116,6 @@ def cargar_base_clientes():
 
 # Función mejorada para generar imágenes formales SIN sobreposición
 def generar_imagen_tabla(df, titulo):
-    # Dimensiones base ligeramente más amplias
     fig, ax = plt.subplots(figsize=(14, len(df) * 0.4 + 1.5))
     ax.axis('tight')
     ax.axis('off')
@@ -109,13 +123,11 @@ def generar_imagen_tabla(df, titulo):
     df_str = df.astype(str)
     tabla = ax.table(cellText=df_str.values, colLabels=df_str.columns, cellLoc='center', loc='center')
     
-    # --- AJUSTE AUTOMÁTICO DE COLUMNAS (Evita que el texto se superponga) ---
     tabla.auto_set_column_width(col=list(range(len(df.columns))))
     tabla.auto_set_font_size(False)
     tabla.set_fontsize(10)
-    tabla.scale(1, 1.8) # Más altura por celda para respirar
+    tabla.scale(1, 1.8) 
     
-    # Estilo formal de Taiyo/Corporativo
     for i in range(len(df.columns)):
         tabla[(0, i)].set_facecolor("#2c3e50")
         tabla[(0, i)].set_text_props(color="white", weight="bold")
@@ -133,213 +145,250 @@ def generar_imagen_tabla(df, titulo):
     plt.close(fig)
     return buf
 
-archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"])
+archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"], on_change=reset_maestro)
 
 if archivo_subido is not None:
-    try:
-        with st.spinner("Procesando matriz de datos..."):
-            # --- PROCESAMIENTO DE RUTEO INTACTO ---
-            df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
-            col_ruta = df_fox.columns[0]
-            col_cliente = df_fox.columns[1]
-            col_cam = df_fox.columns[2]
-            
-            df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
-            df_filtrado = df_fox[~df_fox[col_cam].isin(["NO", "#N/D"])]
-            df_ruteo = df_filtrado.drop_duplicates(subset=[col_ruta, col_cliente, col_cam])
-            
-            df_resumen = df_ruteo.groupby([col_cam, col_ruta])[col_cliente].count().reset_index()
-            df_resumen.rename(columns={col_cliente: "N° de PDVs a Visitar"}, inplace=True)
-            
-            df_clientes = cargar_base_clientes()
-            df_merged = pd.merge(df_ruteo, df_clientes, left_on=col_cliente, right_on='CLIID', how='left')
-            
-            df_final = df_merged[[col_ruta, col_cliente, col_cam, 'CLIDOM', 'TELEFONO', 'X', 'Y']].copy()
-            df_final.rename(columns={'CLIDOM': 'DIRECCION', 'TELEFONO': 'NUMERO', 'X': 'LONGITUD', 'Y': 'LATITUD'}, inplace=True)
-
-            df_final['LATITUD'] = pd.to_numeric(df_final['LATITUD'], errors='coerce')
-            df_final['LONGITUD'] = pd.to_numeric(df_final['LONGITUD'], errors='coerce')
-            df_mapa = df_final.dropna(subset=['LATITUD', 'LONGITUD'])
-
-            col_izq, col_der = st.columns([1, 1.5])
-            with col_izq:
-                st.subheader("Resumen Operativo")
-                st.dataframe(df_resumen, use_container_width=True, hide_index=True)
-            with col_der:
-                st.subheader("Base de Ruteo Consolidada")
-                st.dataframe(df_final, use_container_width=True, hide_index=True)
-            
-            st.divider()
-
-            # --- SECCIÓN DE EXPORTACIÓN Y LINKS (Múltiples Excel, sin ZIP) ---
-            col_export_1, col_export_2 = st.columns(2)
-
-            with col_export_1:
-                st.subheader("📱 Enlace para Ayudantes")
-                st.caption("Envíe este enlace al personal. Podrán seleccionar su camión y ver su ubicación GPS.")
+    # 🔴 BOTÓN DE ACCIONAR 1
+    if st.button("▶️ Procesar Archivo Maestro", type="primary"):
+        st.session_state.procesar_maestro = True
+        
+    if st.session_state.procesar_maestro:
+        try:
+            with st.spinner("Procesando matriz de datos..."):
+                # --- PROCESAMIENTO DE RUTEO INTACTO ---
+                df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
+                col_ruta = df_fox.columns[0]
+                col_cliente = df_fox.columns[1]
+                col_cam = df_fox.columns[2]
                 
-                if not df_mapa.empty:
-                    df_mini = pd.DataFrame({
-                        'la': df_mapa['LATITUD'], 'lo': df_mapa['LONGITUD'],
-                        'c': df_mapa[col_cliente], 'r': df_mapa[col_ruta],
-                        'cam': df_mapa[col_cam], 'd': df_mapa['DIRECCION'].fillna(""),
-                        'n': df_mapa['NUMERO'].fillna("")
-                    })
+                df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
+                df_filtrado = df_fox[~df_fox[col_cam].isin(["NO", "#N/D"])]
+                df_ruteo = df_filtrado.drop_duplicates(subset=[col_ruta, col_cliente, col_cam])
+                
+                # Guardamos la asignación de Cliente->Camión en memoria para el módulo Eventual
+                st.session_state.df_cruce_fox = df_ruteo[[col_cliente, col_cam]].drop_duplicates(subset=[col_cliente])
+                st.session_state.col_cliente_fox = col_cliente
+                st.session_state.col_cam_fox = col_cam
+                
+                df_resumen = df_ruteo.groupby([col_cam, col_ruta])[col_cliente].count().reset_index()
+                df_resumen.rename(columns={col_cliente: "N° de PDVs a Visitar"}, inplace=True)
+                
+                df_clientes = cargar_base_clientes()
+                df_merged = pd.merge(df_ruteo, df_clientes, left_on=col_cliente, right_on='CLIID', how='left')
+                
+                df_final = df_merged[[col_ruta, col_cliente, col_cam, 'CLIDOM', 'TELEFONO', 'X', 'Y']].copy()
+                df_final.rename(columns={'CLIDOM': 'DIRECCION', 'TELEFONO': 'NUMERO', 'X': 'LONGITUD', 'Y': 'LATITUD'}, inplace=True)
+
+                df_final['LATITUD'] = pd.to_numeric(df_final['LATITUD'], errors='coerce')
+                df_final['LONGITUD'] = pd.to_numeric(df_final['LONGITUD'], errors='coerce')
+                df_mapa = df_final.dropna(subset=['LATITUD', 'LONGITUD'])
+
+                col_izq, col_der = st.columns([1, 1.5])
+                with col_izq:
+                    st.subheader("Resumen Operativo")
+                    st.dataframe(df_resumen, use_container_width=True, hide_index=True)
+                with col_der:
+                    st.subheader("Base de Ruteo Consolidada")
+                    st.dataframe(df_final, use_container_width=True, hide_index=True)
+                
+                st.divider()
+
+                # --- SECCIÓN DE EXPORTACIÓN Y LINKS (Múltiples Excel, sin ZIP) ---
+                col_export_1, col_export_2 = st.columns(2)
+
+                with col_export_1:
+                    st.subheader("📱 Enlace para Ayudantes")
+                    st.caption("Envíe este enlace al personal. Podrán seleccionar su camión y ver su ubicación GPS.")
                     
-                    json_str = df_mini.to_json(orient='records')
-                    compressed = zlib.compress(json_str.encode('utf-8'))
-                    encoded = base64.urlsafe_b64encode(compressed).decode('utf-8')
-                    
-                    url_servidor = st.text_input("URL de su portal:", value="https://su-portal.streamlit.app")
-                    link_final = f"{url_servidor.strip('/')}/?data={encoded}"
-                    
-                    st.code(link_final, language="http")
-                else:
-                    st.warning("No hay coordenadas para generar el enlace.")
-
-            with col_export_2:
-                st.subheader("🗺️ Exportación a My Maps")
-                
-                fecha_hoy = datetime.now().strftime("%d/%m/%Y")
-                nombre_mapa = f"MAPA({fecha_hoy})"
-                
-                st.info(
-                    f"**Pasos para My Maps:**\n"
-                    f"1. Descargue los archivos Excel inferiores.\n"
-                    f"2. Abra **Google My Maps**.\n"
-                    f"3. Copie y pegue este nombre: **`{nombre_mapa}`**\n"
-                    f"4. Importe el Excel y agrupe por `CAM`."
-                )
-                
-                rutas_unicas = df_final[col_ruta].unique()
-                
-                if len(rutas_unicas) > 20:
-                    st.warning(f"Se detectaron {len(rutas_unicas)} rutas. Descargue los archivos divididos (máx. 20 rutas c/u).")
-                    
-                    for i in range(0, len(rutas_unicas), 20):
-                        rutas_bloque = rutas_unicas[i:i+20]
-                        df_bloque = df_final[df_final[col_ruta].isin(rutas_bloque)]
+                    if not df_mapa.empty:
+                        df_mini = pd.DataFrame({
+                            'la': df_mapa['LATITUD'], 'lo': df_mapa['LONGITUD'],
+                            'c': df_mapa[col_cliente], 'r': df_mapa[col_ruta],
+                            'cam': df_mapa[col_cam], 'd': df_mapa['DIRECCION'].fillna(""),
+                            'n': df_mapa['NUMERO'].fillna("")
+                        })
                         
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            df_bloque.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+                        json_str = df_mini.to_json(orient='records')
+                        compressed = zlib.compress(json_str.encode('utf-8'))
+                        encoded = base64.urlsafe_b64encode(compressed).decode('utf-8')
                         
-                        nombre_archivo = f"Base_Final_Rutas_Parte_{i//20 + 1}.xlsx"
+                        url_servidor = st.text_input("URL de su portal:", value="https://su-portal.streamlit.app")
+                        link_final = f"{url_servidor.strip('/')}/?data={encoded}"
+                        
+                        st.code(link_final, language="http")
+                    else:
+                        st.warning("No hay coordenadas para generar el enlace.")
+
+                with col_export_2:
+                    st.subheader("🗺️ Exportación a My Maps")
+                    
+                    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+                    nombre_mapa = f"MAPA({fecha_hoy})"
+                    
+                    st.info(
+                        f"**Pasos para My Maps:**\n"
+                        f"1. Descargue los archivos Excel inferiores.\n"
+                        f"2. Abra **Google My Maps**.\n"
+                        f"3. Copie y pegue este nombre: **`{nombre_mapa}`**\n"
+                        f"4. Importe el Excel y agrupe por `CAM`."
+                    )
+                    
+                    rutas_unicas = df_final[col_ruta].unique()
+                    
+                    if len(rutas_unicas) > 20:
+                        st.warning(f"Se detectaron {len(rutas_unicas)} rutas. Descargue los archivos divididos (máx. 20 rutas c/u).")
+                        
+                        for i in range(0, len(rutas_unicas), 20):
+                            rutas_bloque = rutas_unicas[i:i+20]
+                            df_bloque = df_final[df_final[col_ruta].isin(rutas_bloque)]
+                            
+                            excel_buffer = io.BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                df_bloque.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+                            
+                            nombre_archivo = f"Base_Final_Rutas_Parte_{i//20 + 1}.xlsx"
+                            
+                            st.download_button(
+                                label=f"📥 Descargar {nombre_archivo}",
+                                data=excel_buffer.getvalue(),
+                                file_name=nombre_archivo,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                    else:
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                            df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
                         
                         st.download_button(
-                            label=f"📥 Descargar {nombre_archivo}",
-                            data=excel_buffer.getvalue(),
-                            file_name=nombre_archivo,
+                            label="📥 Descargar Base para My Maps (.xlsx)",
+                            data=buffer.getvalue(),
+                            file_name="Base_Final_Rutas.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True
                         )
-                else:
-                    buffer = io.BytesIO()
-                    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                        df_final.to_excel(writer, index=False, sheet_name='Base_Mapeada')
+
+                st.divider()
+
+                # --- SECCIÓN: VENTANAS HORARIAS FIJAS ---
+                st.header("🕒 Ventanas Horarias Fijas")
+                
+                try:
+                    df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
+                    col_f = df_vh.columns[5]
+                    col_g = df_vh.columns[6]
                     
-                    st.download_button(
-                        label="📥 Descargar Base para My Maps (.xlsx)",
-                        data=buffer.getvalue(),
-                        file_name="Base_Final_Rutas.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
+                    df_vh = df_vh.dropna(subset=[col_g])
+                    errores_excel = ["#N/D", "#N/A", "#VALOR!", "#VALUE!", "#REF!", "#DIV/0!", "#NOMBRE?", "#NUM!", "#NULL!"]
+                    df_vh_valido = df_vh[~df_vh[col_g].astype(str).str.strip().str.upper().isin(errores_excel)]
+                    df_vh_valido = df_vh_valido[~df_vh_valido[col_g].astype(str).str.startswith("#")]
+                    
+                    df_criticas = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "SI"]
+                    df_considerar = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "NO"]
+                    
+                    col_vh1, col_vh2 = st.columns(2)
+                    
+                    with col_vh1:
+                        st.write("**Críticas (SI)**")
+                        st.dataframe(df_criticas, use_container_width=True)
+                        if not df_criticas.empty:
+                            img_criticas = generar_imagen_tabla(df_criticas, "Ventanas Horarias Críticas")
+                            st.download_button(
+                                label="🖼️ Descargar Críticas como Imagen",
+                                data=img_criticas.getvalue(),
+                                file_name="VH_Criticas.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                    
+                    with col_vh2:
+                        st.write("**VH a Considerar (NO)**")
+                        st.dataframe(df_considerar, use_container_width=True)
+                        if not df_considerar.empty:
+                            img_considerar = generar_imagen_tabla(df_considerar, "Ventanas Horarias a Considerar")
+                            st.download_button(
+                                label="🖼️ Descargar VH a Considerar como Imagen",
+                                data=img_considerar.getvalue(),
+                                file_name="VH_Considerar.png",
+                                mime="image/png",
+                                use_container_width=True
+                            )
+                            
+                except ValueError:
+                    st.warning("No se encontró la hoja 'VH FIJAS' en el archivo cargado.")
+                except Exception as e:
+                    st.error(f"Error procesando Ventanas Horarias Fijas: {e}")
 
-            st.divider()
-
-            # --- SECCIÓN: VENTANAS HORARIAS FIJAS ---
-            st.header("🕒 Ventanas Horarias Fijas")
-            
-            try:
-                df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
-                col_f = df_vh.columns[5]
-                col_g = df_vh.columns[6]
-                
-                df_vh = df_vh.dropna(subset=[col_g])
-                errores_excel = ["#N/D", "#N/A", "#VALOR!", "#VALUE!", "#REF!", "#DIV/0!", "#NOMBRE?", "#NUM!", "#NULL!"]
-                df_vh_valido = df_vh[~df_vh[col_g].astype(str).str.strip().str.upper().isin(errores_excel)]
-                df_vh_valido = df_vh_valido[~df_vh_valido[col_g].astype(str).str.startswith("#")]
-                
-                df_criticas = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "SI"]
-                df_considerar = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "NO"]
-                
-                col_vh1, col_vh2 = st.columns(2)
-                
-                with col_vh1:
-                    st.write("**Críticas (SI)**")
-                    st.dataframe(df_criticas, use_container_width=True)
-                    if not df_criticas.empty:
-                        img_criticas = generar_imagen_tabla(df_criticas, "Ventanas Horarias Críticas")
-                        st.download_button(
-                            label="🖼️ Descargar Críticas como Imagen",
-                            data=img_criticas.getvalue(),
-                            file_name="VH_Criticas.png",
-                            mime="image/png",
-                            use_container_width=True
-                        )
-                
-                with col_vh2:
-                    st.write("**VH a Considerar (NO)**")
-                    st.dataframe(df_considerar, use_container_width=True)
-                    if not df_considerar.empty:
-                        img_considerar = generar_imagen_tabla(df_considerar, "Ventanas Horarias a Considerar")
-                        st.download_button(
-                            label="🖼️ Descargar VH a Considerar como Imagen",
-                            data=img_considerar.getvalue(),
-                            file_name="VH_Considerar.png",
-                            mime="image/png",
-                            use_container_width=True
-                        )
-                        
-            except ValueError:
-                st.warning("No se encontró la hoja 'VH FIJAS' en el archivo cargado.")
-            except Exception as e:
-                st.error(f"Error procesando Ventanas Horarias Fijas: {e}")
-
-    except Exception as e:
-        st.error(f"Falla en el procesamiento general. Detalle técnico: {e}")
+        except Exception as e:
+            st.error(f"Falla en el procesamiento general. Detalle técnico: {e}")
 
 # --- NUEVO MÓDULO: VENTANAS HORARIAS EVENTUALES ---
 st.divider()
 st.header("📅 Procesamiento de Ventanas Horarias Eventuales")
-st.caption("Cargue el archivo comprimido (.zip) para extraer las fechas y registros eventuales.")
 
-archivo_zip = st.file_uploader("Cargue el archivo .zip de VH Eventuales", type=["zip"])
+archivo_zip = st.file_uploader("Cargue el archivo .zip de VH Eventuales", type=["zip"], on_change=reset_zip)
 
 if archivo_zip is not None:
-    try:
-        with zipfile.ZipFile(archivo_zip, 'r') as z:
-            # Busca automáticamente el archivo de datos dentro del ZIP (ej. VH MAYORISTAS EA.csv)
-            nombres_archivos = z.namelist()
-            archivo_datos = next((f for f in nombres_archivos if f.endswith('.csv') or f.endswith('.xlsx')), None)
-            
-            if archivo_datos:
-                with z.open(archivo_datos) as f:
-                    if archivo_datos.endswith('.csv'):
-                        # Se usa el motor de python para prever distintas separaciones de CSV[cite: 1]
-                        df_vh_ev = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig') 
+    # 🔴 BOTÓN DE ACCIONAR 2
+    if st.button("▶️ Procesar Archivo ZIP", type="primary"):
+        st.session_state.procesar_zip = True
+        
+    if st.session_state.procesar_zip:
+        try:
+            with zipfile.ZipFile(archivo_zip, 'r') as z:
+                nombres_archivos = z.namelist()
+                archivo_datos = next((f for f in nombres_archivos if f.endswith('.csv') or f.endswith('.xlsx')), None)
+                
+                if archivo_datos:
+                    with z.open(archivo_datos) as f:
+                        if archivo_datos.endswith('.csv'):
+                            df_vh_ev = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig') 
+                        else:
+                            df_vh_ev = pd.read_excel(f)
+                    
+                    # Identificación de columnas (A = Fecha, B = Cliente)
+                    col_fecha = df_vh_ev.columns[0]
+                    col_cliente_ev = df_vh_ev.columns[1]
+                    
+                    # 🔴 CRUCE DE DATOS CON FOX (Para obtener el código de camión)
+                    if 'df_cruce_fox' in st.session_state:
+                        df_cruce = st.session_state.df_cruce_fox
+                        col_fox_cli = st.session_state.col_cliente_fox
+                        col_fox_cam = st.session_state.col_cam_fox
+                        
+                        df_vh_ev = pd.merge(df_vh_ev, df_cruce, left_on=col_cliente_ev, right_on=col_fox_cli, how='left')
+                        
+                        # Limpieza de columnas duplicadas
+                        if col_cliente_ev != col_fox_cli:
+                            df_vh_ev = df_vh_ev.drop(columns=[col_fox_cli])
+                        
+                        # Renombrar para ubicarlo fácilmente
+                        df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
                     else:
-                        df_vh_ev = pd.read_excel(f)
-                
-                # Identificamos la columna A (fechas)
-                col_fecha = df_vh_ev.columns[0]
-                df_vh_ev = df_vh_ev.dropna(subset=[col_fecha])
-                
-                fechas_disponibles = df_vh_ev[col_fecha].astype(str).unique().tolist()
-                
-                st.subheader("Filtro Operativo por Fecha")
-                fecha_seleccionada = st.selectbox("Seleccione la fecha a consultar:", ["(Seleccionar)"] + fechas_disponibles)
-                
-                if fecha_seleccionada != "(Seleccionar)":
-                    # Filtrar mostrando toda la información de la fecha
-                    df_filtrado_ev = df_vh_ev[df_vh_ev[col_fecha].astype(str) == fecha_seleccionada]
+                        st.warning("⚠️ Procese primero el 'Archivo Maestro de Ruteo' arriba para poder cruzar los camiones asignados.")
+
+                    # Normalización de la columna fecha para el calendario
+                    df_vh_ev = df_vh_ev.dropna(subset=[col_fecha])
+                    df_vh_ev['Fecha_Limpia'] = pd.to_datetime(df_vh_ev[col_fecha], errors='coerce').dt.date
                     
-                    st.success(f"Mostrando {len(df_filtrado_ev)} registros para la fecha: {fecha_seleccionada}")
-                    st.dataframe(df_filtrado_ev, use_container_width=True)
+                    st.subheader("Filtro Operativo")
+                    # 🔴 CALENDARIO INTERACTIVO
+                    fecha_calendario = st.date_input("Seleccione la fecha a consultar:")
                     
-            else:
-                st.warning("El archivo ZIP no contiene ningún archivo válido (.csv o .xlsx).")
-                
-    except Exception as e:
-        st.error(f"Error al procesar el archivo comprimido. Detalle técnico: {e}")
+                    # 🔴 BOTÓN DE ACCIONAR 3
+                    if st.button("▶️ Procesar Fecha Seleccionada"):
+                        st.session_state.procesar_fecha = True
+                        st.session_state.fecha_activa = fecha_calendario
+                        
+                    if st.session_state.procesar_fecha:
+                        fecha_elegida = st.session_state.fecha_activa
+                        df_filtrado_ev = df_vh_ev[df_vh_ev['Fecha_Limpia'] == fecha_elegida].drop(columns=['Fecha_Limpia'])
+                        
+                        st.success(f"Mostrando {len(df_filtrado_ev)} registros correspondientes al {fecha_elegida.strftime('%d/%m/%Y')}")
+                        st.dataframe(df_filtrado_ev, use_container_width=True)
+                        
+                else:
+                    st.warning("El archivo ZIP no contiene ningún archivo válido (.csv o .xlsx).")
+                    
+        except Exception as e:
+            st.error(f"Error al procesar el archivo comprimido. Detalle técnico: {e}")
