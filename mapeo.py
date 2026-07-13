@@ -7,6 +7,7 @@ import streamlit.components.v1 as components
 import zlib
 import base64
 from datetime import datetime
+import zipfile
 import matplotlib.pyplot as plt
 
 # Configuración de interfaz ejecutiva
@@ -98,31 +99,27 @@ with col_head2:
 def cargar_base_clientes():
     return pd.read_excel(URL_CLIENTES, sheet_name="Clientes", usecols=["CLIID", "CLIDOM", "TELEFONO", "X", "Y"])
 
-# Función para generar imágenes formales de las tablas
+# Función mejorada para generar imágenes formales SIN sobreposición
 def generar_imagen_tabla(df, titulo):
-    # Ajuste dinámico de dimensiones según el tamaño de la tabla
-    ancho = max(12, len(df.columns) * 1.8)
-    alto = max(3, len(df) * 0.4 + 1.5)
-    
-    fig, ax = plt.subplots(figsize=(ancho, alto))
+    # Dimensiones base ligeramente más amplias
+    fig, ax = plt.subplots(figsize=(14, len(df) * 0.4 + 1.5))
     ax.axis('tight')
     ax.axis('off')
     
-    # Renderizado de la tabla
     df_str = df.astype(str)
     tabla = ax.table(cellText=df_str.values, colLabels=df_str.columns, cellLoc='center', loc='center')
     
-    # Estilo formal y ajuste de texto
+    # --- AJUSTE AUTOMÁTICO DE COLUMNAS (Evita que el texto se superponga) ---
+    tabla.auto_set_column_width(col=list(range(len(df.columns))))
     tabla.auto_set_font_size(False)
     tabla.set_fontsize(10)
-    tabla.scale(1, 1.5)
+    tabla.scale(1, 1.8) # Más altura por celda para respirar
     
-    # Color de cabecera
+    # Estilo formal de Taiyo/Corporativo
     for i in range(len(df.columns)):
         tabla[(0, i)].set_facecolor("#2c3e50")
         tabla[(0, i)].set_text_props(color="white", weight="bold")
     
-    # Filas alternas
     for i in range(1, len(df_str) + 1):
         for j in range(len(df.columns)):
             if i % 2 == 0:
@@ -141,7 +138,7 @@ archivo_subido = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", 
 if archivo_subido is not None:
     try:
         with st.spinner("Procesando matriz de datos..."):
-            # --- PROCESAMIENTO ORIGINAL INTACTO ---
+            # --- PROCESAMIENTO DE RUTEO INTACTO ---
             df_fox = pd.read_excel(archivo_subido, sheet_name="FOX", usecols="A:C")
             col_ruta = df_fox.columns[0]
             col_cliente = df_fox.columns[1]
@@ -174,7 +171,7 @@ if archivo_subido is not None:
             
             st.divider()
 
-            # --- SECCIÓN DE EXPORTACIÓN Y LINKS (Modificada: Sin ZIP, múltiples botones) ---
+            # --- SECCIÓN DE EXPORTACIÓN Y LINKS (Múltiples Excel, sin ZIP) ---
             col_export_1, col_export_2 = st.columns(2)
 
             with col_export_1:
@@ -214,7 +211,6 @@ if archivo_subido is not None:
                     f"4. Importe el Excel y agrupe por `CAM`."
                 )
                 
-                # --- Lógica de división sin usar ZIP (Múltiples botones de descarga) ---
                 rutas_unicas = df_final[col_ruta].unique()
                 
                 if len(rutas_unicas) > 20:
@@ -252,32 +248,22 @@ if archivo_subido is not None:
 
             st.divider()
 
-            # --- NUEVA SECCIÓN: VENTANAS HORARIAS ---
-            st.header("🕒 Procesamiento de Ventanas Horarias")
+            # --- SECCIÓN: VENTANAS HORARIAS FIJAS ---
+            st.header("🕒 Ventanas Horarias Fijas")
             
             try:
-                # Leer hoja VH FIJAS
                 df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
-                
-                # Identificadores de columnas (F es índice 5, G es índice 6)
                 col_f = df_vh.columns[5]
                 col_g = df_vh.columns[6]
                 
-                # 1. Filtrar columna G: Que tenga valor y no sea un error de Excel
                 df_vh = df_vh.dropna(subset=[col_g])
                 errores_excel = ["#N/D", "#N/A", "#VALOR!", "#VALUE!", "#REF!", "#DIV/0!", "#NOMBRE?", "#NUM!", "#NULL!"]
                 df_vh_valido = df_vh[~df_vh[col_g].astype(str).str.strip().str.upper().isin(errores_excel)]
-                # Por seguridad extra, omitir si empieza con '#'
                 df_vh_valido = df_vh_valido[~df_vh_valido[col_g].astype(str).str.startswith("#")]
                 
-                # 2. Filtrar para tabla Críticas (Col F = SI)
                 df_criticas = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "SI"]
-                
-                # 3. Filtrar para tabla VH a Considerar (Col F = NO)
                 df_considerar = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "NO"]
                 
-                # Mostrar en el portal
-                st.subheader("Tablas Procesadas")
                 col_vh1, col_vh2 = st.columns(2)
                 
                 with col_vh1:
@@ -307,9 +293,53 @@ if archivo_subido is not None:
                         )
                         
             except ValueError:
-                st.warning("No se encontró la hoja 'VH FIJAS' en el archivo cargado. Asegúrese de que el archivo contiene esta pestaña para usar este módulo.")
+                st.warning("No se encontró la hoja 'VH FIJAS' en el archivo cargado.")
             except Exception as e:
-                st.error(f"Ocurrió un error al procesar las Ventanas Horarias: {e}")
+                st.error(f"Error procesando Ventanas Horarias Fijas: {e}")
 
     except Exception as e:
-        st.error(f"Falla en el procesamiento de los datos de Ruteo. Detalle técnico: {e}")
+        st.error(f"Falla en el procesamiento general. Detalle técnico: {e}")
+
+# --- NUEVO MÓDULO: VENTANAS HORARIAS EVENTUALES ---
+st.divider()
+st.header("📅 Procesamiento de Ventanas Horarias Eventuales")
+st.caption("Cargue el archivo comprimido (.zip) para extraer las fechas y registros eventuales.")
+
+archivo_zip = st.file_uploader("Cargue el archivo .zip de VH Eventuales", type=["zip"])
+
+if archivo_zip is not None:
+    try:
+        with zipfile.ZipFile(archivo_zip, 'r') as z:
+            # Busca automáticamente el archivo de datos dentro del ZIP (ej. VH MAYORISTAS EA.csv)
+            nombres_archivos = z.namelist()
+            archivo_datos = next((f for f in nombres_archivos if f.endswith('.csv') or f.endswith('.xlsx')), None)
+            
+            if archivo_datos:
+                with z.open(archivo_datos) as f:
+                    if archivo_datos.endswith('.csv'):
+                        # Se usa el motor de python para prever distintas separaciones de CSV[cite: 1]
+                        df_vh_ev = pd.read_csv(f, sep=None, engine='python', encoding='utf-8-sig') 
+                    else:
+                        df_vh_ev = pd.read_excel(f)
+                
+                # Identificamos la columna A (fechas)
+                col_fecha = df_vh_ev.columns[0]
+                df_vh_ev = df_vh_ev.dropna(subset=[col_fecha])
+                
+                fechas_disponibles = df_vh_ev[col_fecha].astype(str).unique().tolist()
+                
+                st.subheader("Filtro Operativo por Fecha")
+                fecha_seleccionada = st.selectbox("Seleccione la fecha a consultar:", ["(Seleccionar)"] + fechas_disponibles)
+                
+                if fecha_seleccionada != "(Seleccionar)":
+                    # Filtrar mostrando toda la información de la fecha
+                    df_filtrado_ev = df_vh_ev[df_vh_ev[col_fecha].astype(str) == fecha_seleccionada]
+                    
+                    st.success(f"Mostrando {len(df_filtrado_ev)} registros para la fecha: {fecha_seleccionada}")
+                    st.dataframe(df_filtrado_ev, use_container_width=True)
+                    
+            else:
+                st.warning("El archivo ZIP no contiene ningún archivo válido (.csv o .xlsx).")
+                
+    except Exception as e:
+        st.error(f"Error al procesar el archivo comprimido. Detalle técnico: {e}")
