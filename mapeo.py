@@ -316,7 +316,7 @@ if archivo_subido is not None:
         except Exception as e:
             st.error(f"Falla en el procesamiento general. Detalle técnico: {e}")
 
-# --- NUEVO MÓDULO: VENTANAS HORARIAS EVENTUALES ---
+# --- MÓDULO: VENTANAS HORARIAS EVENTUALES ---
 st.divider()
 st.header("📅 Procesamiento de Ventanas Horarias Eventuales")
 
@@ -373,13 +373,10 @@ if archivo_zip is not None:
                         st.success(f"Mostrando {len(df_filtrado_ev)} registros correspondientes al {fecha_elegida.strftime('%d/%m/%Y')}")
                         st.dataframe(df_filtrado_ev, use_container_width=True)
                         
-                        # --- NUEVO: Exportación de Imagen omitiendo columnas D, E, F ---
                         if not df_filtrado_ev.empty:
                             df_imagen_ev = df_filtrado_ev.copy()
                             
-                            # Asegurarnos de que el DataFrame tenga al menos 6 columnas antes de intentar borrar
                             if len(df_imagen_ev.columns) >= 6:
-                                # Las columnas D, E, F corresponden a los índices 3, 4 y 5
                                 columnas_a_omitir = df_imagen_ev.columns[3:6]
                                 df_imagen_ev = df_imagen_ev.drop(columns=columnas_a_omitir)
                             
@@ -398,4 +395,23 @@ if archivo_zip is not None:
                     
         except Exception as e:
             st.error(f"Error al procesar el archivo comprimido. Detalle técnico: {e}")
-            
+
+# --- NUEVO MÓDULO: GEOS EVENTUALES ---
+st.divider()
+st.header("📍 Geos Eventuales")
+st.caption("Pegue los datos desde Excel directamente en la tabla inferior. Las columnas están predefinidas y bloqueadas.")
+
+columnas_geos = [
+    "FECHA", "COD CLIENTE", "Y", "X", "Motivo", 
+    "CD", "Bultos", "SDV", "JDV", "VALIDACIÓN", "¿Para mañana?"
+]
+
+df_geos_template = pd.DataFrame(columns=columnas_geos)
+
+df_geos_input = st.data_editor(
+    df_geos_template,
+    num_rows="dynamic",
+    use_container_width=True,
+    hide_index=True,
+    key="geos_eventuales_editor"
+)
