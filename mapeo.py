@@ -348,9 +348,14 @@ if archivo_zip is not None:
                     col_cliente_ev = df_vh_ev.columns[1]
                     
                     if 'df_cruce_fox' in st.session_state:
-                        df_cruce = st.session_state.df_cruce_fox
+                        # Se usa .copy() para no alterar la variable original de estado
+                        df_cruce = st.session_state.df_cruce_fox.copy()
                         col_fox_cli = st.session_state.col_cliente_fox
                         col_fox_cam = st.session_state.col_cam_fox
+                        
+                        # --- CORRECCIÓN DE ERROR DE CRUCE ---
+                        df_vh_ev[col_cliente_ev] = df_vh_ev[col_cliente_ev].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+                        df_cruce[col_fox_cli] = df_cruce[col_fox_cli].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                         
                         df_vh_ev = pd.merge(df_vh_ev, df_cruce, left_on=col_cliente_ev, right_on=col_fox_cli, how='left')
                         
@@ -428,9 +433,14 @@ if st.button("▶️ Procesar Geos Eventuales", type="primary"):
 if st.session_state.procesar_geos:
     if not df_geos_input.empty:
         if 'df_cruce_fox' in st.session_state:
-            df_cruce = st.session_state.df_cruce_fox
+            # Se usa .copy() para evitar problemas con la sesión
+            df_cruce = st.session_state.df_cruce_fox.copy()
             col_fox_cli = st.session_state.col_cliente_fox
             col_fox_cam = st.session_state.col_cam_fox
+            
+            # --- CORRECCIÓN DE ERROR DE CRUCE ---
+            df_geos_input["COD CLIENTE"] = df_geos_input["COD CLIENTE"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            df_cruce[col_fox_cli] = df_cruce[col_fox_cli].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             
             # 1. Cruzar con el archivo FOX para obtener el camión
             df_merged_geos = pd.merge(
