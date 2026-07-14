@@ -20,6 +20,8 @@ if 'procesar_zip' not in st.session_state:
     st.session_state.procesar_zip = False
 if 'procesar_fecha' not in st.session_state:
     st.session_state.procesar_fecha = False
+if 'procesar_geos' not in st.session_state:
+    st.session_state.procesar_geos = False
 
 def reset_maestro():
     st.session_state.procesar_maestro = False
@@ -27,6 +29,9 @@ def reset_maestro():
 def reset_zip():
     st.session_state.procesar_zip = False
     st.session_state.procesar_fecha = False
+
+def reset_geos():
+    st.session_state.procesar_geos = False
 
 # --- LECTURA SEGURA DEL LINK ---
 data_encoded = None
@@ -396,7 +401,7 @@ if archivo_zip is not None:
         except Exception as e:
             st.error(f"Error al procesar el archivo comprimido. Detalle técnico: {e}")
 
-# --- NUEVO MÓDULO: GEOS EVENTUALES ---
+# --- MÓDULO: GEOS EVENTUALES ---
 st.divider()
 st.header("📍 Geos Eventuales")
 st.caption("Pegue los datos desde Excel directamente en la tabla inferior. Las columnas están predefinidas y bloqueadas.")
@@ -413,5 +418,49 @@ df_geos_input = st.data_editor(
     num_rows="dynamic",
     use_container_width=True,
     hide_index=True,
-    key="geos_eventuales_editor"
+    key="geos_eventuales_editor",
+    on_change=reset_geos
 )
+
+if st.button("▶️ Procesar Geos Eventuales", type="primary"):
+    st.session_state.procesar_geos = True
+
+if st.session_state.procesar_geos:
+    if not df_geos_input.empty:
+        if 'df_cruce_fox' in st.session_state:
+            df_cruce = st.session_state.df_cruce_fox
+            col_fox_cli = st.session_state.col_cliente_fox
+            col_fox_cam = st.session_state.col_cam_fox
+            
+            # 1. Cruzar con el archivo FOX para obtener el camión
+            df_merged_geos = pd.merge(
+                df_geos_input, 
+                df_cruce, 
+                left_on="COD CLIENTE", 
+                right_on=col_fox_cli, 
+                how="left"
+            )
+            
+            # 2. Generar el mensaje de WhatsApp
+            mensaje_wp = "*Geo Alternativas*\n\n"
+            
+            for index, row in df_merged_geos.iterrows():
+                cliente = row["COD CLIENTE"]
+                camion = row[col_fox_cam] if pd.notna(row[col_fox_cam]) else "SIN ASIGNAR"
+                lat = row["Y"]
+                lon = row["X"]
+                
+                # Formato de link estándar de Google Maps
+                link_maps = f"https://www.google.com/maps?q={lat},{lon}"
+                
+                mensaje_wp += f"• {cliente} - {link_maps} - {camion}\n"
+            
+            st.success("Cruce exitoso. Copie el mensaje a continuación para enviarlo por WhatsApp:")
+            
+            # Se muestra en un bloque de código para copiarlo con 1 clic
+            st.code(mensaje_wp, language="text")
+            
+        else:
+            st.warning("⚠️ Procese primero el 'Archivo Maestro de Ruteo' (arriba) para poder cruzar y obtener los códigos de camión.")
+    else:
+        st.info("La tabla está vacía. Por favor pegue sus datos antes de procesar.")
