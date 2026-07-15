@@ -20,6 +20,7 @@ if 'procesar_3308' not in st.session_state: st.session_state.procesar_3308 = Fal
 if 'procesar_zip' not in st.session_state: st.session_state.procesar_zip = False
 if 'procesar_fecha' not in st.session_state: st.session_state.procesar_fecha = False
 if 'procesar_geos' not in st.session_state: st.session_state.procesar_geos = False
+if 'procesar_pedidos' not in st.session_state: st.session_state.procesar_pedidos = False
 
 def reset_parcial(): st.session_state.procesar_parcial = False
 def reset_completo(): st.session_state.procesar_completo = False
@@ -28,6 +29,7 @@ def reset_zip():
     st.session_state.procesar_zip = False
     st.session_state.procesar_fecha = False
 def reset_geos(): st.session_state.procesar_geos = False
+def reset_pedidos(): st.session_state.procesar_pedidos = False
 
 # --- LECTURA SEGURA DEL LINK ---
 data_encoded = None
@@ -143,19 +145,20 @@ def generar_imagen_tabla(df, titulo):
     plt.close(fig)
     return buf
 
-# --- FUNCIONES NÚCLEO DE PROCESAMIENTO (INTACTAS) ---
+# --- FUNCIONES NÚCLEO DE PROCESAMIENTO ---
 def modulo_ruteo(df_fox, sufijo_key):
     col_ruta = df_fox.columns[0]
     col_cliente = df_fox.columns[1]
     col_cam = df_fox.columns[2]
     
     df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
-    df_filtrado = df_fox[~df_fox[col_cam].isin(["NO", "#N/D"])]
-    df_ruteo = df_filtrado.drop_duplicates(subset=[col_ruta, col_cliente, col_cam])
     
-    st.session_state.df_cruce_fox = df_ruteo[[col_cliente, col_cam]].drop_duplicates(subset=[col_cliente])
+    st.session_state.df_cruce_fox = df_fox[[col_cliente, col_cam]].drop_duplicates(subset=[col_cliente])
     st.session_state.col_cliente_fox = col_cliente
     st.session_state.col_cam_fox = col_cam
+    
+    df_filtrado = df_fox[~df_fox[col_cam].isin(["NO", "#N/D"])]
+    df_ruteo = df_filtrado.drop_duplicates(subset=[col_ruta, col_cliente, col_cam])
     
     df_resumen = df_ruteo.groupby([col_cam, col_ruta])[col_cliente].count().reset_index()
     df_resumen.rename(columns={col_cliente: "N° de PDVs a Visitar"}, inplace=True)
@@ -261,6 +264,29 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
     st.header("🕒 Ventanas Horarias Fijas")
     try:
         df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
+        
+        if 'df_cruce_fox' in st.session_state:
+            df_cruce = st.session_state.df_cruce_fox.copy()
+            col_fox_cli = st.session_state.col_cliente_fox
+            col_fox_cam = st.session_state.col_cam_fox
+            
+            col_cli_vh = None
+            for col in df_vh.columns:
+                if str(col).strip().upper() == str(col_fox_cli).strip().upper() or 'CLIENTE' in str(col).upper() or 'COD' in str(col).upper():
+                    col_cli_vh = col
+                    break
+            if not col_cli_vh:
+                col_cli_vh = df_vh.columns[1]
+                
+            df_vh['__temp_cli__'] = df_vh[col_cli_vh].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            df_cruce['__temp_cli__'] = df_cruce[col_fox_cli].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+            
+            mapa_camiones = df_cruce.set_index('__temp_cli__')[col_fox_cam].to_dict()
+            df_vh['__temp_cam__'] = df_vh['__temp_cli__'].map(mapa_camiones)
+            
+            df_vh = df_vh[~df_vh['__temp_cam__'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN'])]
+            df_vh = df_vh.drop(columns=['__temp_cli__', '__temp_cam__'])
+        
         col_f = df_vh.columns[5]
         col_g = df_vh.columns[6]
         
@@ -406,6 +432,8 @@ if archivo_zip is not None:
                             df_vh_ev = df_vh_ev.drop(columns=[col_fox_cli])
                         
                         df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
+                        
+                        df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN'])]
                     else:
                         st.warning("⚠️ Procese primero alguna de las pestañas de Ruteo arriba para poder cruzar los camiones asignados.")
 
@@ -509,4 +537,58 @@ if st.session_state.procesar_geos:
             st.warning("⚠️ Procese primero alguna de las pestañas de Ruteo (arriba) para poder cruzar y obtener los códigos de camión.")
     else:
         st.info("La tabla está vacía. Por favor pegue sus datos antes de procesar.")
-                    
+
+
+# --- NUEVO MÓDULO: PEDIDOS EVENTUALES ---
+st.divider()
+st.header("📦 Pedidos Eventuales")
+st.caption("Pegue los datos desde Excel directamente en la tabla inferior. Las columnas están predefinidas y bloqueadas.")
+
+columnas_pedidos = [
+    "COD CLIENTE", "CLIENTE", "LATITUD yLONGITUD x", "N° DE PEDIDO", "COD PROD", 
+    "DESCRIPCION", "CANTIDAD", "Peso HB", "SIS", "SOLICITANTE", "TELÉFONO SOLIC", 
+    "OBS FACTURA", "PERSONA QUE RECIBE", "NIT", "TELÉFONO PERSONA QUE RECIBE", 
+    "DIRECCIÓN ESCRITA", "CAMIÓN", "PLANILLA", "EVENTO", "MONTO", "OBSERVACIONES", 
+    "VENTANA HORARIA"
+]
+
+df_pedidos_template = pd.DataFrame(columns=columnas_pedidos)
+
+df_pedidos_input = st.data_editor(
+    df_pedidos_template,
+    num_rows="dynamic",
+    use_container_width=True,
+    hide_index=True,
+    key="pedidos_eventuales_editor",
+    on_change=reset_pedidos
+)
+
+if st.button("▶️ Procesar Pedidos", type="primary", key="btn_pedidos"):
+    st.session_state.procesar_pedidos = True
+
+if st.session_state.procesar_pedidos:
+    if not df_pedidos_input.empty:
+        mensaje_wp_pedidos = ""
+        
+        for index, row in df_pedidos_input.iterrows():
+            # Extracción y limpieza de variables para evitar "nan" en el mensaje
+            cod_cliente = "" if pd.isna(row.get("COD CLIENTE")) else str(row.get("COD CLIENTE")).strip()
+            tel_solic = "" if pd.isna(row.get("TELÉFONO SOLIC")) else str(row.get("TELÉFONO SOLIC")).strip()
+            tel_recibe = "" if pd.isna(row.get("TELÉFONO PERSONA QUE RECIBE")) else str(row.get("TELÉFONO PERSONA QUE RECIBE")).strip()
+            persona_recibe = "" if pd.isna(row.get("PERSONA QUE RECIBE")) else str(row.get("PERSONA QUE RECIBE")).strip()
+            link_maps = "" if pd.isna(row.get("LATITUD yLONGITUD x")) else str(row.get("LATITUD yLONGITUD x")).strip()
+            ventana_horaria = "" if pd.isna(row.get("VENTANA HORARIA")) else str(row.get("VENTANA HORARIA")).strip()
+            
+            # Construcción del bloque de texto con el formato exacto
+            bloque_texto = "EVENTUAL\n"
+            bloque_texto += f"COD: {cod_cliente} @{tel_solic}\n"
+            bloque_texto += f"Contacto: {tel_recibe} - {persona_recibe}\n"
+            bloque_texto += f"{link_maps}\n"
+            bloque_texto += f"VH: {ventana_horaria}\n\n"
+            
+            mensaje_wp_pedidos += bloque_texto
+            
+        st.success("Pedidos procesados con éxito. Copie el mensaje a continuación para enviarlo:")
+        st.code(mensaje_wp_pedidos, language="text")
+    else:
+        st.info("La tabla de pedidos está vacía. Por favor pegue sus datos antes de procesar.")
