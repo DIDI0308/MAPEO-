@@ -571,15 +571,16 @@ if st.session_state.procesar_pedidos:
         mensaje_wp_pedidos = ""
         
         for index, row in df_pedidos_input.iterrows():
-            # Extracción y limpieza de variables para evitar "nan" en el mensaje
             cod_cliente = "" if pd.isna(row.get("COD CLIENTE")) else str(row.get("COD CLIENTE")).strip()
             tel_solic = "" if pd.isna(row.get("TELÉFONO SOLIC")) else str(row.get("TELÉFONO SOLIC")).strip()
             tel_recibe = "" if pd.isna(row.get("TELÉFONO PERSONA QUE RECIBE")) else str(row.get("TELÉFONO PERSONA QUE RECIBE")).strip()
             persona_recibe = "" if pd.isna(row.get("PERSONA QUE RECIBE")) else str(row.get("PERSONA QUE RECIBE")).strip()
-            link_maps = "" if pd.isna(row.get("LATITUD yLONGITUD x")) else str(row.get("LATITUD yLONGITUD x")).strip()
+            
+            # --- MODIFICACIÓN: La ubicación se toma de la columna "OBSERVACIONES" ---
+            link_maps = "" if pd.isna(row.get("OBSERVACIONES")) else str(row.get("OBSERVACIONES")).strip()
+            
             ventana_horaria = "" if pd.isna(row.get("VENTANA HORARIA")) else str(row.get("VENTANA HORARIA")).strip()
             
-            # Construcción del bloque de texto con el formato exacto
             bloque_texto = "EVENTUAL\n"
             bloque_texto += f"COD: {cod_cliente} @{tel_solic}\n"
             bloque_texto += f"Contacto: {tel_recibe} - {persona_recibe}\n"
