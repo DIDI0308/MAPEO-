@@ -263,7 +263,24 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
     st.divider()
     st.header("🕒 Ventanas Horarias Fijas")
     try:
-        df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
+        # Validar si es una lista de archivos (Ruteo Completo) o un solo archivo
+        if isinstance(archivo_subido, list):
+            lista_vh = []
+            for arch in archivo_subido:
+                try:
+                    arch.seek(0)
+                    df_temp = pd.read_excel(arch, sheet_name="VH FIJAS")
+                    lista_vh.append(df_temp)
+                except ValueError:
+                    pass
+            if len(lista_vh) > 0:
+                df_vh = pd.concat(lista_vh, ignore_index=True)
+            else:
+                st.warning("No se encontró la hoja 'VH FIJAS' en los archivos cargados.")
+                return
+        else:
+            archivo_subido.seek(0)
+            df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
         
         if 'df_cruce_fox' in st.session_state:
             df_cruce = st.session_state.df_cruce_fox.copy()
@@ -347,6 +364,7 @@ with tab_parcial:
         if st.session_state.procesar_parcial:
             try:
                 with st.spinner("Procesando matriz de datos..."):
+                    archivo_parcial.seek(0)
                     df_fox = pd.read_excel(archivo_parcial, sheet_name="FOX", usecols="A:C")
                     modulo_ruteo(df_fox, "parcial")
                     modulo_vh_fijas(archivo_parcial, "parcial")
@@ -367,11 +385,14 @@ with tab_completo:
                 with st.spinner("Concatenando y procesando archivos múltiples..."):
                     lista_dfs = []
                     for arch in archivos_completos:
+                        arch.seek(0)
                         df_temp = pd.read_excel(arch, sheet_name="FOX", usecols="A:C")
                         lista_dfs.append(df_temp)
                     
                     df_fox_completo = pd.concat(lista_dfs, ignore_index=True)
                     modulo_ruteo(df_fox_completo, "completo")
+                    # Llama al módulo de VH enviando la lista de archivos para que concatene las VH FIJAS
+                    modulo_vh_fijas(archivos_completos, "completo")
             except Exception as e:
                 st.error(f"Falla en el procesamiento: {e}")
 
@@ -386,6 +407,7 @@ with tab_3308:
         if st.session_state.procesar_3308:
             try:
                 with st.spinner("Procesando matriz de datos..."):
+                    archivo_3308.seek(0)
                     df_fox = pd.read_excel(archivo_3308, sheet_name="FOX", usecols="A:C")
                     modulo_ruteo(df_fox, "3308")
                     modulo_vh_fijas(archivo_3308, "3308")
@@ -575,10 +597,7 @@ if st.session_state.procesar_pedidos:
             tel_solic = "" if pd.isna(row.get("TELÉFONO SOLIC")) else str(row.get("TELÉFONO SOLIC")).strip()
             tel_recibe = "" if pd.isna(row.get("TELÉFONO PERSONA QUE RECIBE")) else str(row.get("TELÉFONO PERSONA QUE RECIBE")).strip()
             persona_recibe = "" if pd.isna(row.get("PERSONA QUE RECIBE")) else str(row.get("PERSONA QUE RECIBE")).strip()
-            
-            # --- MODIFICACIÓN: La ubicación se toma de la columna "OBSERVACIONES" ---
             link_maps = "" if pd.isna(row.get("OBSERVACIONES")) else str(row.get("OBSERVACIONES")).strip()
-            
             ventana_horaria = "" if pd.isna(row.get("VENTANA HORARIA")) else str(row.get("VENTANA HORARIA")).strip()
             
             bloque_texto = "EVENTUAL\n"
