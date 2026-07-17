@@ -281,6 +281,11 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
             archivo_subido.seek(0)
             df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
         
+        col_f = df_vh.columns[5]
+        
+        # Identificamos directamente la columna final de "CAM"
+        col_cam_vh = next((c for c in df_vh.columns if str(c).strip().upper() in ['CAM', 'CAMION', 'CAMIÓN']), df_vh.columns[6])
+
         if 'df_cruce_fox' in st.session_state:
             df_cruce = st.session_state.df_cruce_fox.copy()
             col_fox_cli = st.session_state.col_cliente_fox
@@ -298,19 +303,19 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
             df_cruce['__temp_cli__'] = df_cruce[col_fox_cli].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             
             mapa_camiones = df_cruce.set_index('__temp_cli__')[col_fox_cam].to_dict()
-            df_vh['__temp_cam__'] = df_vh['__temp_cli__'].map(mapa_camiones)
             
-            # 🔴 ELIMINACIÓN estricta de clientes cuyo camión sea "NO" o inválido
-            df_vh = df_vh[~df_vh['__temp_cam__'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN', 'NONE', 'NULL'])]
-            df_vh = df_vh.drop(columns=['__temp_cli__', '__temp_cam__'])
+            # Reemplaza o llena la columna final del camión con los datos mapeados
+            df_vh[col_cam_vh] = df_vh['__temp_cli__'].map(mapa_camiones).fillna(df_vh[col_cam_vh])
+            df_vh = df_vh.drop(columns=['__temp_cli__'])
         
-        col_f = df_vh.columns[5]
-        col_g = df_vh.columns[6]
+        # 🔴 FILTRO STRICTO: Elimina filas vacías o con "NO" directamente en la columna CAM
+        df_vh = df_vh.dropna(subset=[col_cam_vh])
+        errores_excel = ["NO", "#N/D", "#N/A", "#VALOR!", "#VALUE!", "#REF!", "#DIV/0!", "#NOMBRE?", "#NUM!", "#NULL!", "NAN", "NONE", "NULL"]
+        df_vh_valido = df_vh[~df_vh[col_cam_vh].astype(str).str.strip().str.upper().isin(errores_excel)]
+        df_vh_valido = df_vh_valido[~df_vh_valido[col_cam_vh].astype(str).str.startswith("#")]
         
-        df_vh = df_vh.dropna(subset=[col_g])
-        errores_excel = ["#N/D", "#N/A", "#VALOR!", "#VALUE!", "#REF!", "#DIV/0!", "#NOMBRE?", "#NUM!", "#NULL!"]
-        df_vh_valido = df_vh[~df_vh[col_g].astype(str).str.strip().str.upper().isin(errores_excel)]
-        df_vh_valido = df_vh_valido[~df_vh_valido[col_g].astype(str).str.startswith("#")]
+        # 🔴 ORDENAMIENTO (A-Z) en base a la columna CAM
+        df_vh_valido = df_vh_valido.sort_values(by=col_cam_vh, ascending=True)
         
         df_criticas = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "SI"]
         df_considerar = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "NO"]
@@ -454,8 +459,10 @@ if archivo_zip is not None:
                         
                         df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
                         
-                        # 🔴 ELIMINACIÓN estricta de clientes cuyo camión sea "NO" o inválido
+                        # 🔴 FILTRO STRICTO: Elimina los "NO" en Eventuales y ORDENA de la A a la Z
+                        df_vh_ev = df_vh_ev.dropna(subset=['CAMIÓN ASIGNADO'])
                         df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN', 'NONE', 'NULL'])]
+                        df_vh_ev = df_vh_ev.sort_values(by='CAMIÓN ASIGNADO', ascending=True)
                     else:
                         st.warning("⚠️ Procese primero alguna de las pestañas de Ruteo arriba para poder cruzar los camiones asignados.")
 
