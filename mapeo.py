@@ -263,7 +263,6 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
     st.divider()
     st.header("🕒 Ventanas Horarias Fijas")
     try:
-        # Validar si es una lista de archivos (Ruteo Completo) o un solo archivo
         if isinstance(archivo_subido, list):
             lista_vh = []
             for arch in archivo_subido:
@@ -301,7 +300,8 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
             mapa_camiones = df_cruce.set_index('__temp_cli__')[col_fox_cam].to_dict()
             df_vh['__temp_cam__'] = df_vh['__temp_cli__'].map(mapa_camiones)
             
-            df_vh = df_vh[~df_vh['__temp_cam__'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN'])]
+            # 🔴 ELIMINACIÓN estricta de clientes cuyo camión sea "NO" o inválido
+            df_vh = df_vh[~df_vh['__temp_cam__'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN', 'NONE', 'NULL'])]
             df_vh = df_vh.drop(columns=['__temp_cli__', '__temp_cam__'])
         
         col_f = df_vh.columns[5]
@@ -391,7 +391,6 @@ with tab_completo:
                     
                     df_fox_completo = pd.concat(lista_dfs, ignore_index=True)
                     modulo_ruteo(df_fox_completo, "completo")
-                    # Llama al módulo de VH enviando la lista de archivos para que concatene las VH FIJAS
                     modulo_vh_fijas(archivos_completos, "completo")
             except Exception as e:
                 st.error(f"Falla en el procesamiento: {e}")
@@ -455,7 +454,8 @@ if archivo_zip is not None:
                         
                         df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
                         
-                        df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN'])]
+                        # 🔴 ELIMINACIÓN estricta de clientes cuyo camión sea "NO" o inválido
+                        df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN', 'NONE', 'NULL'])]
                     else:
                         st.warning("⚠️ Procese primero alguna de las pestañas de Ruteo arriba para poder cruzar los camiones asignados.")
 
@@ -561,7 +561,7 @@ if st.session_state.procesar_geos:
         st.info("La tabla está vacía. Por favor pegue sus datos antes de procesar.")
 
 
-# --- NUEVO MÓDULO: PEDIDOS EVENTUALES ---
+# --- MÓDULO: PEDIDOS EVENTUALES ---
 st.divider()
 st.header("📦 Pedidos Eventuales")
 st.caption("Pegue los datos desde Excel directamente en la tabla inferior. Las columnas están predefinidas y bloqueadas.")
