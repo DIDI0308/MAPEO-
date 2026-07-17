@@ -283,15 +283,14 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
         
         col_f = df_vh.columns[5]
         
-        # Identificamos directamente la columna final de "CAM"
         col_cam_vh = next((c for c in df_vh.columns if str(c).strip().upper() in ['CAM', 'CAMION', 'CAMIÓN']), df_vh.columns[6])
+        col_cli_vh = None
 
         if 'df_cruce_fox' in st.session_state:
             df_cruce = st.session_state.df_cruce_fox.copy()
             col_fox_cli = st.session_state.col_cliente_fox
             col_fox_cam = st.session_state.col_cam_fox
             
-            col_cli_vh = None
             for col in df_vh.columns:
                 if str(col).strip().upper() == str(col_fox_cli).strip().upper() or 'CLIENTE' in str(col).upper() or 'COD' in str(col).upper():
                     col_cli_vh = col
@@ -304,18 +303,21 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
             
             mapa_camiones = df_cruce.set_index('__temp_cli__')[col_fox_cam].to_dict()
             
-            # Reemplaza o llena la columna final del camión con los datos mapeados
             df_vh[col_cam_vh] = df_vh['__temp_cli__'].map(mapa_camiones).fillna(df_vh[col_cam_vh])
             df_vh = df_vh.drop(columns=['__temp_cli__'])
         
-        # 🔴 FILTRO STRICTO: Elimina filas vacías o con "NO" directamente en la columna CAM
+        if not col_cli_vh:
+            col_cli_vh = df_vh.columns[1]
+            
         df_vh = df_vh.dropna(subset=[col_cam_vh])
         errores_excel = ["NO", "#N/D", "#N/A", "#VALOR!", "#VALUE!", "#REF!", "#DIV/0!", "#NOMBRE?", "#NUM!", "#NULL!", "NAN", "NONE", "NULL"]
         df_vh_valido = df_vh[~df_vh[col_cam_vh].astype(str).str.strip().str.upper().isin(errores_excel)]
         df_vh_valido = df_vh_valido[~df_vh_valido[col_cam_vh].astype(str).str.startswith("#")]
         
-        # 🔴 ORDENAMIENTO (A-Z) en base a la columna CAM
         df_vh_valido = df_vh_valido.sort_values(by=col_cam_vh, ascending=True)
+        
+        # 🔴 ELIMINACIÓN DE CLIENTES DUPLICADOS
+        df_vh_valido = df_vh_valido.drop_duplicates(subset=[col_cli_vh])
         
         df_criticas = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "SI"]
         df_considerar = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "NO"]
@@ -459,7 +461,6 @@ if archivo_zip is not None:
                         
                         df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
                         
-                        # 🔴 FILTRO STRICTO: Elimina los "NO" en Eventuales y ORDENA de la A a la Z
                         df_vh_ev = df_vh_ev.dropna(subset=['CAMIÓN ASIGNADO'])
                         df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN', 'NONE', 'NULL'])]
                         df_vh_ev = df_vh_ev.sort_values(by='CAMIÓN ASIGNADO', ascending=True)
@@ -479,6 +480,9 @@ if archivo_zip is not None:
                     if st.session_state.procesar_fecha:
                         fecha_elegida = st.session_state.fecha_activa
                         df_filtrado_ev = df_vh_ev[df_vh_ev['Fecha_Limpia'] == fecha_elegida].drop(columns=['Fecha_Limpia'])
+                        
+                        # 🔴 ELIMINACIÓN DE CLIENTES DUPLICADOS
+                        df_filtrado_ev = df_filtrado_ev.drop_duplicates(subset=[col_cliente_ev])
                         
                         st.success(f"Mostrando {len(df_filtrado_ev)} registros correspondientes al {fecha_elegida.strftime('%d/%m/%Y')}")
                         st.dataframe(df_filtrado_ev, use_container_width=True)
@@ -600,15 +604,15 @@ if st.session_state.procesar_pedidos:
         mensaje_wp_pedidos = ""
         
         for index, row in df_pedidos_input.iterrows():
-            cod_cliente = "" if pd.isna(row.get("COD CLIENTE")) else str(row.get("COD CLIENTE")).strip()
-            tel_solic = "" if pd.isna(row.get("TELÉFONO SOLIC")) else str(row.get("TELÉFONO SOLIC")).strip()
-            tel_recibe = "" if pd.isna(row.get("TELÉFONO PERSONA QUE RECIBE")) else str(row.get("TELÉFONO PERSONA QUE RECIBE")).strip()
+            cod_cliente = "" if pd.isna(row.get("COD CLIENTE")) else str(row.get("COD CLIENTE")).replace('.0', '').strip()
+            tel_solic = "" if pd.isna(row.get("TELÉFONO SOLIC")) else str(row.get("TELÉFONO SOLIC")).replace('.0', '').strip()
+            tel_recibe = "" if pd.isna(row.get("TELÉFONO PERSONA QUE RECIBE")) else str(row.get("TELÉFONO PERSONA QUE RECIBE")).replace('.0', '').strip()
             persona_recibe = "" if pd.isna(row.get("PERSONA QUE RECIBE")) else str(row.get("PERSONA QUE RECIBE")).strip()
             link_maps = "" if pd.isna(row.get("OBSERVACIONES")) else str(row.get("OBSERVACIONES")).strip()
             ventana_horaria = "" if pd.isna(row.get("VENTANA HORARIA")) else str(row.get("VENTANA HORARIA")).strip()
             
             bloque_texto = "EVENTUAL\n"
-            bloque_texto += f"COD: {cod_cliente} @{tel_solic}\n"
+            bloque_texto += f"COD: {cod_cliente} @+591 {tel_solic}\n"
             bloque_texto += f"Contacto: {tel_recibe} - {persona_recibe}\n"
             bloque_texto += f"{link_maps}\n"
             bloque_texto += f"VH: {ventana_horaria}\n\n"
