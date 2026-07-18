@@ -153,6 +153,7 @@ def modulo_ruteo(df_fox, sufijo_key):
     
     df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
     
+    # Memoria Súper para los eventuales y geos
     st.session_state.df_cruce_fox = df_fox[[col_cliente, col_cam]].drop_duplicates(subset=[col_cliente])
     st.session_state.col_cliente_fox = col_cliente
     st.session_state.col_cam_fox = col_cam
@@ -282,7 +283,6 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
             df_vh = pd.read_excel(archivo_subido, sheet_name="VH FIJAS")
         
         col_f = df_vh.columns[5]
-        
         col_cam_vh = next((c for c in df_vh.columns if str(c).strip().upper() in ['CAM', 'CAMION', 'CAMIÓN']), df_vh.columns[6])
         col_cli_vh = None
 
@@ -315,8 +315,6 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
         df_vh_valido = df_vh_valido[~df_vh_valido[col_cam_vh].astype(str).str.startswith("#")]
         
         df_vh_valido = df_vh_valido.sort_values(by=col_cam_vh, ascending=True)
-        
-        # 🔴 ELIMINACIÓN DE CLIENTES DUPLICADOS
         df_vh_valido = df_vh_valido.drop_duplicates(subset=[col_cli_vh])
         
         df_criticas = df_vh_valido[df_vh_valido[col_f].astype(str).str.strip().str.upper() == "SI"]
@@ -394,6 +392,8 @@ with tab_completo:
                     for arch in archivos_completos:
                         arch.seek(0)
                         df_temp = pd.read_excel(arch, sheet_name="FOX", usecols="A:C")
+                        # 🔴 FIX DE CONCATENACIÓN PARA BUSCAR EN AMBAS PLANILLAS
+                        df_temp.columns = ["RUTA", "CLIENTE", "CAM"]
                         lista_dfs.append(df_temp)
                     
                     df_fox_completo = pd.concat(lista_dfs, ignore_index=True)
@@ -481,7 +481,6 @@ if archivo_zip is not None:
                         fecha_elegida = st.session_state.fecha_activa
                         df_filtrado_ev = df_vh_ev[df_vh_ev['Fecha_Limpia'] == fecha_elegida].drop(columns=['Fecha_Limpia'])
                         
-                        # 🔴 ELIMINACIÓN DE CLIENTES DUPLICADOS
                         df_filtrado_ev = df_filtrado_ev.drop_duplicates(subset=[col_cliente_ev])
                         
                         st.success(f"Mostrando {len(df_filtrado_ev)} registros correspondientes al {fecha_elegida.strftime('%d/%m/%Y')}")
