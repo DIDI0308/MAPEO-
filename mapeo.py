@@ -461,8 +461,9 @@ if archivo_zip is not None:
                         
                         df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
                         
-                        df_vh_ev = df_vh_ev.dropna(subset=['CAMIÓN ASIGNADO'])
-                        df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D', 'NAN', 'NONE', 'NULL'])]
+                        # 🔴 NUEVO: Mantiene los registros vacíos en camión, pero elimina los 'NO' o '#N/D' explícitos
+                        df_vh_ev['CAMIÓN ASIGNADO'] = df_vh_ev['CAMIÓN ASIGNADO'].fillna("")
+                        df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D'])]
                         df_vh_ev = df_vh_ev.sort_values(by='CAMIÓN ASIGNADO', ascending=True)
                     else:
                         st.warning("⚠️ Procese primero alguna de las pestañas de Ruteo arriba para poder cruzar los camiones asignados.")
@@ -481,7 +482,13 @@ if archivo_zip is not None:
                         fecha_elegida = st.session_state.fecha_activa
                         df_filtrado_ev = df_vh_ev[df_vh_ev['Fecha_Limpia'] == fecha_elegida].drop(columns=['Fecha_Limpia'])
                         
+                        # Eliminación de clientes duplicados
                         df_filtrado_ev = df_filtrado_ev.drop_duplicates(subset=[col_cliente_ev])
+                        
+                        # 🔴 NUEVO: BUSCADOR POR CÓDIGO DE CLIENTE
+                        buscador_cliente = st.text_input("🔍 Buscar por Código de Cliente (Opcional):", key="search_cli_ev")
+                        if buscador_cliente:
+                            df_filtrado_ev = df_filtrado_ev[df_filtrado_ev[col_cliente_ev].astype(str).str.contains(buscador_cliente.strip(), case=False, na=False)]
                         
                         st.success(f"Mostrando {len(df_filtrado_ev)} registros correspondientes al {fecha_elegida.strftime('%d/%m/%Y')}")
                         st.dataframe(df_filtrado_ev, use_container_width=True)
