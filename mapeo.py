@@ -404,7 +404,8 @@ with tab_completo:
 
 with tab_3308:
     st.header("RUTEO 3308")
-    archivo_3308 = st.file_uploader("Cargue el archivo maestro de ruteo 3308 (.xlsx)", type=["xlsx"], key="up_3308", on_change=reset_3308)
+    # 🔴 ACEPTA ARCHIVOS CSV
+    archivo_3308 = st.file_uploader("Cargue el archivo maestro de ruteo 3308 (.csv o .xlsx)", type=["csv", "xlsx"], key="up_3308", on_change=reset_3308)
     
     if archivo_3308 is not None:
         if st.button("▶️ Procesar 3308", type="primary", key="btn_3308"):
@@ -412,11 +413,36 @@ with tab_3308:
             
         if st.session_state.procesar_3308:
             try:
-                with st.spinner("Procesando matriz de datos..."):
+                with st.spinner("Procesando matriz de datos 3308..."):
                     archivo_3308.seek(0)
-                    df_fox = pd.read_excel(archivo_3308, sheet_name="FOX", usecols="A:C")
-                    modulo_ruteo(df_fox, "3308")
-                    modulo_vh_fijas(archivo_3308, "3308")
+                    
+                    # 🔴 LÓGICA EXCLUSIVA PARA EL CSV PEDIDOS 2
+                    if archivo_3308.name.lower().endswith('.csv'):
+                        try:
+                            # 1. Saltar 5 filas y 2. Separar por comas
+                            df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='utf-8-sig', on_bad_lines='skip')
+                        except UnicodeDecodeError:
+                            archivo_3308.seek(0)
+                            df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='latin-1', on_bad_lines='skip')
+                            
+                        if len(df_3308.columns) > 19:
+                            # 3. Extraer Col B (index 1) y Col T (index 19)
+                            df_fox = df_3308[[0, 1, 19]].copy()
+                            df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
+                            
+                            # 4. Eliminar duplicados en base a Columna B (CLIENTE) y T (CAM)
+                            df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
+                            
+                            # 5. Enviar al "súper cerebro"
+                            modulo_ruteo(df_fox, "3308")
+                        else:
+                            st.error("El archivo CSV no tiene suficientes columnas (mínimo 20) para encontrar la Columna T.")
+                    
+                    else:
+                        df_fox = pd.read_excel(archivo_3308, sheet_name="FOX", usecols="A:C")
+                        modulo_ruteo(df_fox, "3308")
+                        modulo_vh_fijas(archivo_3308, "3308")
+                        
             except Exception as e:
                 st.error(f"Falla en el procesamiento: {e}")
 
@@ -461,7 +487,6 @@ if archivo_zip is not None:
                         
                         df_vh_ev.rename(columns={col_fox_cam: 'CAMIÓN ASIGNADO'}, inplace=True)
                         
-                        # 🔴 NUEVO: Mantiene los registros vacíos en camión, pero elimina los 'NO' o '#N/D' explícitos
                         df_vh_ev['CAMIÓN ASIGNADO'] = df_vh_ev['CAMIÓN ASIGNADO'].fillna("")
                         df_vh_ev = df_vh_ev[~df_vh_ev['CAMIÓN ASIGNADO'].astype(str).str.strip().str.upper().isin(['NO', '#N/D'])]
                         df_vh_ev = df_vh_ev.sort_values(by='CAMIÓN ASIGNADO', ascending=True)
@@ -482,10 +507,8 @@ if archivo_zip is not None:
                         fecha_elegida = st.session_state.fecha_activa
                         df_filtrado_ev = df_vh_ev[df_vh_ev['Fecha_Limpia'] == fecha_elegida].drop(columns=['Fecha_Limpia'])
                         
-                        # Eliminación de clientes duplicados
                         df_filtrado_ev = df_filtrado_ev.drop_duplicates(subset=[col_cliente_ev])
                         
-                        # 🔴 NUEVO: BUSCADOR POR CÓDIGO DE CLIENTE
                         buscador_cliente = st.text_input("🔍 Buscar por Código de Cliente (Opcional):", key="search_cli_ev")
                         if buscador_cliente:
                             df_filtrado_ev = df_filtrado_ev[df_filtrado_ev[col_cliente_ev].astype(str).str.contains(buscador_cliente.strip(), case=False, na=False)]
