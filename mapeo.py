@@ -392,7 +392,6 @@ with tab_completo:
                     for arch in archivos_completos:
                         arch.seek(0)
                         df_temp = pd.read_excel(arch, sheet_name="FOX", usecols="A:C")
-                        # 🔴 FIX DE CONCATENACIÓN PARA BUSCAR EN AMBAS PLANILLAS
                         df_temp.columns = ["RUTA", "CLIENTE", "CAM"]
                         lista_dfs.append(df_temp)
                     
@@ -404,8 +403,12 @@ with tab_completo:
 
 with tab_3308:
     st.header("RUTEO 3308")
+    
     # 🔴 ACEPTA ARCHIVOS CSV
     archivo_3308 = st.file_uploader("Cargue el archivo maestro de ruteo 3308 (.csv o .xlsx)", type=["csv", "xlsx"], key="up_3308", on_change=reset_3308)
+    
+    # 🔴 NUEVO BOTÓN: Checkbox para controlar el tratamiento de datos
+    aplicar_tratamiento = st.checkbox("⚙️ Aplicar Tratamiento de Datos (Eliminar 5 primeras filas)", value=True, key="chk_tratamiento_3308")
     
     if archivo_3308 is not None:
         if st.button("▶️ Procesar 3308", type="primary", key="btn_3308"):
@@ -418,12 +421,15 @@ with tab_3308:
                     
                     # 🔴 LÓGICA EXCLUSIVA PARA EL CSV PEDIDOS 2
                     if archivo_3308.name.lower().endswith('.csv'):
+                        # Se define cuántas filas saltar según el checkbox
+                        saltar_filas = 5 if aplicar_tratamiento else 0
+                        
                         try:
-                            # 1. Saltar 5 filas y 2. Separar por comas
-                            df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='utf-8-sig', on_bad_lines='skip')
+                            # Leer separando por comas y saltando las filas elegidas
+                            df_3308 = pd.read_csv(archivo_3308, skiprows=saltar_filas, sep=',', header=None, encoding='utf-8-sig', on_bad_lines='skip')
                         except UnicodeDecodeError:
                             archivo_3308.seek(0)
-                            df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='latin-1', on_bad_lines='skip')
+                            df_3308 = pd.read_csv(archivo_3308, skiprows=saltar_filas, sep=',', header=None, encoding='latin-1', on_bad_lines='skip')
                             
                         if len(df_3308.columns) > 19:
                             # 3. Extraer Col B (index 1) y Col T (index 19)
