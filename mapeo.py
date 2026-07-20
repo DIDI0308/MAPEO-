@@ -404,11 +404,11 @@ with tab_completo:
 with tab_3308:
     st.header("RUTEO 3308")
     
-    # 🔴 ACEPTA ARCHIVOS CSV
     archivo_3308 = st.file_uploader("Cargue el archivo maestro de ruteo 3308 (.csv o .xlsx)", type=["csv", "xlsx"], key="up_3308", on_change=reset_3308)
     
-    # 🔴 NUEVO BOTÓN: Checkbox para controlar el tratamiento de datos
-    aplicar_tratamiento = st.checkbox("⚙️ Aplicar Tratamiento de Datos (Eliminar 5 primeras filas)", value=True, key="chk_tratamiento_3308")
+    # 🔴 BOTÓN DE TRATAMIENTO ESTÁ AQUÍ
+    aplicar_tratamiento = st.checkbox("⚙️ Archivo Crudo (Eliminar 5 primeras filas y forzar separación por comas)", value=True, key="chk_tratamiento_3308")
+    st.caption("Desmarque esta casilla si la base YA está limpia (columnas separadas y sin las 5 filas iniciales).")
     
     if archivo_3308 is not None:
         if st.button("▶️ Procesar 3308", type="primary", key="btn_3308"):
@@ -419,32 +419,55 @@ with tab_3308:
                 with st.spinner("Procesando matriz de datos 3308..."):
                     archivo_3308.seek(0)
                     
-                    # 🔴 LÓGICA EXCLUSIVA PARA EL CSV PEDIDOS 2
                     if archivo_3308.name.lower().endswith('.csv'):
-                        # Se define cuántas filas saltar según el checkbox
-                        saltar_filas = 5 if aplicar_tratamiento else 0
-                        
-                        try:
-                            # Leer separando por comas y saltando las filas elegidas
-                            df_3308 = pd.read_csv(archivo_3308, skiprows=saltar_filas, sep=',', header=None, encoding='utf-8-sig', on_bad_lines='skip')
-                        except UnicodeDecodeError:
-                            archivo_3308.seek(0)
-                            df_3308 = pd.read_csv(archivo_3308, skiprows=saltar_filas, sep=',', header=None, encoding='latin-1', on_bad_lines='skip')
+                        if aplicar_tratamiento:
+                            # TRATAMIENTO: Salta 5 filas, separa por comas y toma Col B y T
+                            try:
+                                df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='utf-8-sig', on_bad_lines='skip', engine='python')
+                            except UnicodeDecodeError:
+                                archivo_3308.seek(0)
+                                df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='latin-1', on_bad_lines='skip', engine='python')
                             
-                        if len(df_3308.columns) > 19:
-                            # 3. Extraer Col B (index 1) y Col T (index 19)
-                            df_fox = df_3308[[0, 1, 19]].copy()
-                            df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
-                            
-                            # 4. Eliminar duplicados en base a Columna B (CLIENTE) y T (CAM)
-                            df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
-                            
-                            # 5. Enviar al "súper cerebro"
-                            modulo_ruteo(df_fox, "3308")
+                            if len(df_3308.columns) > 19:
+                                df_fox = df_3308.iloc[:, [0, 1, 19]].copy()
+                                df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
+                                df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
+                                modulo_ruteo(df_fox, "3308")
+                            else:
+                                # Rescate si todo quedó en la columna 0
+                                archivo_3308.seek(0)
+                                df_raw = pd.read_csv(archivo_3308, skiprows=5, sep='\n', header=None, on_bad_lines='skip')
+                                df_split = df_raw[0].astype(str).str.split(',', expand=True)
+                                if len(df_split.columns) > 19:
+                                    df_fox = df_split.iloc[:, [0, 1, 19]].copy()
+                                    df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
+                                    df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
+                                    modulo_ruteo(df_fox, "3308")
+                                else:
+                                    st.error("Error: El archivo crudo no tiene la estructura esperada (mínimo 20 columnas).")
                         else:
-                            st.error("El archivo CSV no tiene suficientes columnas (mínimo 20) para encontrar la Columna T.")
+                            # 🔴 BASE YA TRATADA: No salta filas y lee las columnas directamente
+                            try:
+                                df_3308 = pd.read_csv(archivo_3308, sep=None, engine='python', encoding='utf-8-sig', on_bad_lines='skip')
+                            except UnicodeDecodeError:
+                                archivo_3308.seek(0)
+                                df_3308 = pd.read_csv(archivo_3308, sep=None, engine='python', encoding='latin-1', on_bad_lines='skip')
+                            
+                            # Validar si tiene 20 columnas toma la B y T. Si tiene 3, toma la A, B y C.
+                            if len(df_3308.columns) >= 20:
+                                df_fox = df_3308.iloc[:, [0, 1, 19]].copy()
+                            elif len(df_3308.columns) >= 3:
+                                df_fox = df_3308.iloc[:, [0, 1, 2]].copy()
+                            else:
+                                st.error("Error: El archivo tratado no tiene suficientes columnas.")
+                                st.stop()
+                                
+                            df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
+                            df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
+                            modulo_ruteo(df_fox, "3308")
                     
                     else:
+                        # Si es un Excel clásico
                         df_fox = pd.read_excel(archivo_3308, sheet_name="FOX", usecols="A:C")
                         modulo_ruteo(df_fox, "3308")
                         modulo_vh_fijas(archivo_3308, "3308")
