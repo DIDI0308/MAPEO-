@@ -115,6 +115,15 @@ with col_head2:
 def cargar_base_clientes():
     return pd.read_excel(URL_CLIENTES, sheet_name="Clientes", usecols=["CLIID", "CLIDOM", "TELEFONO", "X", "Y"])
 
+# 🔴 NUEVO: Carga de la estructura de camiones
+@st.cache_data
+def cargar_estructura_camiones():
+    try:
+        return pd.read_excel(URL_CLIENTES, sheet_name="estructura_camiones", usecols="A:G", header=None)
+    except Exception as e:
+        st.error("No se pudo cargar la hoja 'estructura_camiones' del mapa base clientes.")
+        return pd.DataFrame()
+
 def generar_imagen_tabla(df, titulo):
     fig, ax = plt.subplots(figsize=(14, len(df) * 0.4 + 1.5))
     ax.axis('tight')
@@ -406,7 +415,8 @@ with tab_3308:
     
     archivo_3308 = st.file_uploader("Cargue el archivo maestro de ruteo 3308 (.csv o .xlsx)", type=["csv", "xlsx"], key="up_3308", on_change=reset_3308)
     
-    # 🔴 BOTÓN DE TRATAMIENTO ESTÁ AQUÍ
+    # 🔴 NUEVOS CONTROLES EXCLUSIVOS DEL 3308
+    selector_ciudad = st.radio("📍 Seleccione la Región para el filtro de camiones:", ["EA", "LP"], key="ciudad_3308", horizontal=True)
     aplicar_tratamiento = st.checkbox("⚙️ Archivo Crudo (Eliminar 5 primeras filas y forzar separación por comas)", value=True, key="chk_tratamiento_3308")
     st.caption("Desmarque esta casilla si la base YA está limpia (columnas separadas y sin las 5 filas iniciales).")
     
@@ -419,58 +429,86 @@ with tab_3308:
                 with st.spinner("Procesando matriz de datos 3308..."):
                     archivo_3308.seek(0)
                     
+                    # 1. Cargar estructura de camiones (Drive) para el filtro
+                    df_est = cargar_estructura_camiones()
+                    camiones_validos = set()
+                    
+                    if not df_est.empty:
+                        for c in df_est.columns:
+                            df_est[c] = df_est[c].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.upper()
+                        
+                        # Definir columnas de validación según región
+                        cols_validas = [0, 1, 2, 5] if selector_ciudad == "EA" else [3, 4, 6]
+                        for idx in cols_validas:
+                            if idx < len(df_est.columns):
+                                camiones_validos.update(df_est.iloc[:, idx].tolist())
+                        
+                        camiones_validos = {c for c in camiones_validos if c not in ["NAN", "NONE", "NULL", ""]}
+                    
+                    # Función interna para extraer Cliente (B) y Camión (T)
+                    def extraer_columnas(df_raw):
+                        if len(df_raw.columns) >= 20:
+                            return pd.DataFrame({"CLIENTE": df_raw.iloc[:, 1], "CAM": df_raw.iloc[:, 19]})
+                        elif len(df_raw.columns) >= 3:
+                            return pd.DataFrame({"CLIENTE": df_raw.iloc[:, 1], "CAM": df_raw.iloc[:, 2]})
+                        elif len(df_raw.columns) == 2:
+                            return pd.DataFrame({"CLIENTE": df_raw.iloc[:, 0], "CAM": df_raw.iloc[:, 1]})
+                        return None
+
+                    # 2. Extracción de datos del archivo
+                    df_fox_temp = None
                     if archivo_3308.name.lower().endswith('.csv'):
                         if aplicar_tratamiento:
-                            # TRATAMIENTO: Salta 5 filas, separa por comas y toma Col B y T
                             try:
                                 df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='utf-8-sig', on_bad_lines='skip', engine='python')
                             except UnicodeDecodeError:
                                 archivo_3308.seek(0)
                                 df_3308 = pd.read_csv(archivo_3308, skiprows=5, sep=',', header=None, encoding='latin-1', on_bad_lines='skip', engine='python')
                             
-                            if len(df_3308.columns) > 19:
-                                df_fox = df_3308.iloc[:, [0, 1, 19]].copy()
-                                df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
-                                df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
-                                modulo_ruteo(df_fox, "3308")
-                            else:
-                                # Rescate si todo quedó en la columna 0
+                            df_fox_temp = extraer_columnas(df_3308)
+                            
+                            if df_fox_temp is None:
                                 archivo_3308.seek(0)
                                 df_raw = pd.read_csv(archivo_3308, skiprows=5, sep='\n', header=None, on_bad_lines='skip')
                                 df_split = df_raw[0].astype(str).str.split(',', expand=True)
-                                if len(df_split.columns) > 19:
-                                    df_fox = df_split.iloc[:, [0, 1, 19]].copy()
-                                    df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
-                                    df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
-                                    modulo_ruteo(df_fox, "3308")
-                                else:
-                                    st.error("Error: El archivo crudo no tiene la estructura esperada (mínimo 20 columnas).")
+                                df_fox_temp = extraer_columnas(df_split)
                         else:
-                            # 🔴 BASE YA TRATADA: No salta filas y lee las columnas directamente
                             try:
                                 df_3308 = pd.read_csv(archivo_3308, sep=None, engine='python', encoding='utf-8-sig', on_bad_lines='skip')
                             except UnicodeDecodeError:
                                 archivo_3308.seek(0)
                                 df_3308 = pd.read_csv(archivo_3308, sep=None, engine='python', encoding='latin-1', on_bad_lines='skip')
-                            
-                            # Validar si tiene 20 columnas toma la B y T. Si tiene 3, toma la A, B y C.
-                            if len(df_3308.columns) >= 20:
-                                df_fox = df_3308.iloc[:, [0, 1, 19]].copy()
-                            elif len(df_3308.columns) >= 3:
-                                df_fox = df_3308.iloc[:, [0, 1, 2]].copy()
-                            else:
-                                st.error("Error: El archivo tratado no tiene suficientes columnas.")
-                                st.stop()
-                                
-                            df_fox.columns = ["RUTA", "CLIENTE", "CAM"]
-                            df_fox = df_fox.drop_duplicates(subset=["CLIENTE", "CAM"])
-                            modulo_ruteo(df_fox, "3308")
-                    
+                            df_fox_temp = extraer_columnas(df_3308)
                     else:
-                        # Si es un Excel clásico
-                        df_fox = pd.read_excel(archivo_3308, sheet_name="FOX", usecols="A:C")
+                        # Fallback si suben Excel antiguo
+                        df_temp_excel = pd.read_excel(archivo_3308, sheet_name="FOX", header=None)
+                        if len(df_temp_excel.columns) >= 3:
+                            df_fox_temp = pd.DataFrame({"CLIENTE": df_temp_excel.iloc[1:, 1], "CAM": df_temp_excel.iloc[1:, 2]})
+                    
+                    # 3. Aplicar Filtro y luego quitar duplicados
+                    if df_fox_temp is not None:
+                        df_fox_temp['CAM'] = df_fox_temp['CAM'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.upper()
+                        
+                        # 🔴 PRIMERO: Filtramos por los camiones válidos
+                        if not df_est.empty:
+                            def es_valido(cam):
+                                return (cam in camiones_validos) or (cam.split('.')[0] in camiones_validos)
+                            df_fox_temp = df_fox_temp[df_fox_temp['CAM'].apply(es_valido)]
+                        
+                        # 🔴 SEGUNDO: Eliminamos Duplicados
+                        df_fox_temp = df_fox_temp.drop_duplicates(subset=["CLIENTE", "CAM"])
+                        
+                        # 🔴 TERCERO: Asignar Planilla (RUTA) única según el código de camión
+                        df_fox_temp['RUTA'] = df_fox_temp['CAM']
+                        
+                        # Enviar al "Súper Cerebro"
+                        df_fox = df_fox_temp[["RUTA", "CLIENTE", "CAM"]].copy()
                         modulo_ruteo(df_fox, "3308")
-                        modulo_vh_fijas(archivo_3308, "3308")
+                        
+                        if archivo_3308.name.lower().endswith('.xlsx'):
+                            modulo_vh_fijas(archivo_3308, "3308")
+                    else:
+                        st.error("Error: El archivo no tiene la estructura esperada para extraer Cliente (B) y Camión (T).")
                         
             except Exception as e:
                 st.error(f"Falla en el procesamiento: {e}")
