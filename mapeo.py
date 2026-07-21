@@ -105,7 +105,6 @@ def preparar_link_drive(url):
 URL_CLIENTES_ORIGINAL = "https://docs.google.com/spreadsheets/d/1zIllojDvh23QUOP8afJbxD66I5Ly6tgY/edit?usp=sharing&ouid=106121329840167757528&rtpof=true&sd=true"
 URL_CLIENTES = preparar_link_drive(URL_CLIENTES_ORIGINAL)
 
-# 🔴 NUEVO DRIVE DE CAMIONES
 URL_CAMIONES_ORIGINAL = "https://docs.google.com/spreadsheets/d/18bsymByHBshLc34kNFhfmhKPVhua7yjl/edit?usp=sharing&ouid=106121329840167757528&rtpof=true&sd=true"
 URL_CAMIONES = preparar_link_drive(URL_CAMIONES_ORIGINAL)
 
@@ -164,6 +163,25 @@ def modulo_ruteo(df_fox, sufijo_key):
     col_cliente = df_fox.columns[1]
     col_cam = df_fox.columns[2]
     
+    # 🔴 NUEVO: SECCIÓN DE ADELANTOS ANTES DE PROCESAR
+    st.subheader("➕ Adelantos Manuales (Opcional)")
+    st.caption("Añada Código de Cliente y Camión. Se integrarán a la ruta y cruzarán automáticamente con VH y Geos.")
+    
+    df_adelantos_template = pd.DataFrame(columns=[col_cliente, col_cam])
+    df_adelantos = st.data_editor(
+        df_adelantos_template,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"adelantos_{sufijo_key}"
+    )
+    
+    if not df_adelantos.empty:
+        df_ad_clean = df_adelantos.dropna(subset=[col_cliente, col_cam])
+        if not df_ad_clean.empty:
+            df_ad_clean[col_ruta] = "ADELANTO"
+            df_fox = pd.concat([df_fox, df_ad_clean[[col_ruta, col_cliente, col_cam]]], ignore_index=True)
+    
+    # Continuación normal del código de ruteo
     df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
     
     st.session_state.df_cruce_fox = df_fox[[col_cliente, col_cam]].drop_duplicates(subset=[col_cliente])
@@ -180,11 +198,13 @@ def modulo_ruteo(df_fox, sufijo_key):
     df_merged = pd.merge(df_ruteo, df_clientes, left_on=col_cliente, right_on='CLIID', how='left')
     
     df_final = df_merged[[col_ruta, col_cliente, col_cam, 'CLIDOM', 'TELEFONO', 'X', 'Y']].copy()
-    df_final.rename(columns={'CLIDOM': 'DIRECCION', 'TELEFONO': 'NUMERO', 'X': 'LONGITUD', 'Y': 'LATITUD'}, inplace=True)
+    
+    # 🔴 CORRECCIÓN MY MAPS: Nombres estándar en inglés y conversión pura numérica
+    df_final.rename(columns={'CLIDOM': 'DIRECCION', 'TELEFONO': 'NUMERO', 'X': 'Longitude', 'Y': 'Latitude'}, inplace=True)
 
-    df_final['LATITUD'] = pd.to_numeric(df_final['LATITUD'], errors='coerce')
-    df_final['LONGITUD'] = pd.to_numeric(df_final['LONGITUD'], errors='coerce')
-    df_mapa = df_final.dropna(subset=['LATITUD', 'LONGITUD'])
+    df_final['Latitude'] = pd.to_numeric(df_final['Latitude'], errors='coerce')
+    df_final['Longitude'] = pd.to_numeric(df_final['Longitude'], errors='coerce')
+    df_mapa = df_final.dropna(subset=['Latitude', 'Longitude'])
 
     col_izq, col_der = st.columns([1, 1.5])
     with col_izq:
@@ -201,7 +221,7 @@ def modulo_ruteo(df_fox, sufijo_key):
         st.subheader("📱 Enlace para Ayudantes")
         st.caption("Envíe este enlace al personal. Podrán seleccionar su camión y ver su ubicación GPS.")
         if not df_mapa.empty:
-            df_mini = pd.DataFrame({'la': df_mapa['LATITUD'], 'lo': df_mapa['LONGITUD'], 'c': df_mapa[col_cliente], 'r': df_mapa[col_ruta], 'cam': df_mapa[col_cam], 'd': df_mapa['DIRECCION'].fillna(""), 'n': df_mapa['NUMERO'].fillna("")})
+            df_mini = pd.DataFrame({'la': df_mapa['Latitude'], 'lo': df_mapa['Longitude'], 'c': df_mapa[col_cliente], 'r': df_mapa[col_ruta], 'cam': df_mapa[col_cam], 'd': df_mapa['DIRECCION'].fillna(""), 'n': df_mapa['NUMERO'].fillna("")})
             json_str = df_mini.to_json(orient='records')
             compressed = zlib.compress(json_str.encode('utf-8'))
             encoded = base64.urlsafe_b64encode(compressed).decode('utf-8')
@@ -215,7 +235,7 @@ def modulo_ruteo(df_fox, sufijo_key):
         st.subheader("🗺️ Exportación a My Maps")
         fecha_hoy = datetime.now().strftime("%d/%m/%Y")
         nombre_mapa = f"MAPA({fecha_hoy})"
-        st.info(f"**Pasos para My Maps:**\n1. Descargue los archivos Excel.\n2. Abra **Google My Maps**.\n3. Copie y pegue este nombre: **`{nombre_mapa}`**\n4. Importe el Excel y agrupe por `CAM`.")
+        st.info(f"**Pasos para My Maps:**\n1. Descargue los archivos Excel inferiores *(My Maps reconocerá automáticamente las columnas de Latitude/Longitude)*.\n2. Abra **Google My Maps**.\n3. Copie y pegue este nombre: **`{nombre_mapa}`**\n4. Importe el Excel y agrupe por `CAM`.")
         
         rutas_unicas = df_final[col_ruta].unique()
         if len(rutas_unicas) > 20:
@@ -317,7 +337,6 @@ if st.session_state.pagina_actual == "Inicio":
 # ==========================================
 
 elif st.session_state.pagina_actual == "Ruteo":
-    # Botón Volver Arriba de Todo
     st.button("⬅️ Volver al Menú Principal", on_click=ir_a_pagina, args=("Inicio",), use_container_width=True)
     
     st.title("🛣️ Módulo de Ruteo")
@@ -326,7 +345,6 @@ elif st.session_state.pagina_actual == "Ruteo":
     df_camiones = cargar_datos_camiones_info()
     
     if not df_camiones.empty:
-        # Extraer lista de camiones limpiando datos
         lista_camiones = df_camiones.iloc[:, 0].dropna().astype(str).tolist()
         lista_camiones = sorted(list(set(lista_camiones)))
         
@@ -334,10 +352,8 @@ elif st.session_state.pagina_actual == "Ruteo":
         
         if camion_sel:
             st.markdown("---")
-            # Buscar el registro exacto
             info = df_camiones[df_camiones.iloc[:, 0].astype(str) == camion_sel].iloc[0]
             
-            # Formatear números a texto evitando '.0'
             val_lento = str(info.iloc[1]).replace('.0', '').strip()
             val_vuelta = str(info.iloc[2]).replace('.0', '').strip()
             val_ceja = str(info.iloc[3]).replace('.0', '').strip()
@@ -346,7 +362,6 @@ elif st.session_state.pagina_actual == "Ruteo":
             val_ol = str(info.iloc[6]).strip()
             val_flota = str(info.iloc[7]).strip()
             
-            # --- TRADUCCIÓN A LÓGICA DE NEGOCIO ---
             text_lento = "⚠️ Sí (Evitar rutas dispersas o largas)" if val_lento == "1" else "✅ No (Ruta normal)"
             text_vuelta = "⚡ Sí (Vehículo rápido)" if val_vuelta == "1" else "Normal"
             
@@ -359,7 +374,6 @@ elif st.session_state.pagina_actual == "Ruteo":
             
             prioridad = "🔥 ALTA (Asignar primero)" if "fija" in val_flota.lower() else "⏳ BAJA (Asignar después)"
             
-            # --- DISEÑO VISUAL ---
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.info("👤 **Datos Base**")
@@ -386,7 +400,6 @@ elif st.session_state.pagina_actual == "Ruteo":
 # ==========================================
 
 elif st.session_state.pagina_actual == "Mapeo":
-    # Botón Volver Arriba de Todo
     st.button("⬅️ Volver al Menú Principal", on_click=ir_a_pagina, args=("Inicio",), use_container_width=True)
     
     st.title("🗺️ Módulo de Mapeo y Base de Datos")
