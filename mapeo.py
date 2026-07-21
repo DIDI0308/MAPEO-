@@ -93,7 +93,7 @@ if data_encoded:
     except Exception as e:
         st.error("Enlace de ruteo inválido o datos corruptos.")
     
-    st.stop() # Detiene la ejecución aquí para que los ayudantes no vean la carátula
+    st.stop() 
 
 # --- CONFIGURACIÓN DE CONEXIÓN CON DRIVE Y FUNCIONES CACHÉ ---
 def preparar_link_drive(url):
@@ -165,16 +165,17 @@ def modulo_ruteo(df_fox, sufijo_key, df_adelantos=None):
     
     # 🔴 INTEGRACIÓN DE ADELANTOS
     if df_adelantos is not None and not df_adelantos.empty:
-        # Limpiar filas vacías del componente de adelantos
         df_ad_clean = df_adelantos.dropna(how='all')
         if not df_ad_clean.empty:
             df_ad_renamed = pd.DataFrame({
-                col_ruta: df_ad_clean.iloc[:, 0],    # RUTA proporcionada por el usuario
+                col_ruta: df_ad_clean.iloc[:, 0],    # RUTA
                 col_cliente: df_ad_clean.iloc[:, 1], # CLIENTE
                 col_cam: df_ad_clean.iloc[:, 2]      # CAMION
             })
             df_fox = pd.concat([df_fox, df_ad_renamed], ignore_index=True)
     
+    # 🔴 LIMPIEZA RIGUROSA PARA QUE MY MAPS AGRUPE PERFECTAMENTE LAS RUTAS
+    df_fox[col_ruta] = df_fox[col_ruta].astype(str).str.strip().str.upper()
     df_fox[col_cliente] = df_fox[col_cliente].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
     
@@ -197,12 +198,10 @@ def modulo_ruteo(df_fox, sufijo_key, df_adelantos=None):
     
     df_final.rename(columns={'CLIDOM': 'DIRECCION', 'TELEFONO': 'NUMERO', 'X': 'Longitude', 'Y': 'Latitude'}, inplace=True)
 
-    # Convertimos numéricamente solo para el mapa de Streamlit
     df_final['Latitude'] = pd.to_numeric(df_final['Latitude'], errors='coerce')
     df_final['Longitude'] = pd.to_numeric(df_final['Longitude'], errors='coerce')
     df_mapa = df_final.dropna(subset=['Latitude', 'Longitude'])
 
-    # 🔴 SOLUCIÓN MY MAPS: Forzar las coordenadas a ser TEXTO PURO antes de exportar
     df_final['Latitude'] = df_final['Latitude'].apply(lambda x: f"{x}" if pd.notnull(x) else "")
     df_final['Longitude'] = df_final['Longitude'].apply(lambda x: f"{x}" if pd.notnull(x) else "")
 
@@ -328,7 +327,7 @@ if st.session_state.pagina_actual == "Inicio":
         
     with col2:
         st.success("🛣️ **Módulo de Ruteo Estratégico**")
-        st.write("Planificación de camiones según velocidad, restricciones de zonas (Ceja, Pirhua, JPII) y tipo de flota.")
+        st.write("Planificación de camiones según velocidad, restricciones de zonas y disponibilidad de flota operativa.")
         st.button("Ingresar a Ruteo", on_click=ir_a_pagina, args=("Ruteo",), use_container_width=True)
 
 
@@ -340,6 +339,9 @@ elif st.session_state.pagina_actual == "Ruteo":
     st.button("⬅️ Volver al Menú Principal", on_click=ir_a_pagina, args=("Inicio",), use_container_width=True)
     
     st.title("🛣️ Módulo de Ruteo")
+    
+    ciudad_ruteo = st.radio("📍 Seleccione la Ciudad Operativa:", ["EA", "LP"], horizontal=True)
+    
     st.write("Consulta y validación de las características de cada unidad operativa.")
     
     df_camiones = cargar_datos_camiones_info()
@@ -354,46 +356,74 @@ elif st.session_state.pagina_actual == "Ruteo":
             st.markdown("---")
             info = df_camiones[df_camiones.iloc[:, 0].astype(str) == camion_sel].iloc[0]
             
-            val_lento = str(info.iloc[1]).replace('.0', '').strip()
-            val_vuelta = str(info.iloc[2]).replace('.0', '').strip()
-            val_ceja = str(info.iloc[3]).replace('.0', '').strip()
-            val_pirhua = str(info.iloc[4]).replace('.0', '').strip()
-            val_jpii = str(info.iloc[5]).replace('.0', '').strip()
             val_ol = str(info.iloc[6]).strip()
             val_flota = str(info.iloc[7]).strip()
-            
-            text_lento = "⚠️ Sí (Evitar rutas dispersas o largas)" if val_lento == "1" else "✅ No (Ruta normal)"
-            text_vuelta = "⚡ Sí (Vehículo rápido)" if val_vuelta == "1" else "Normal"
-            
-            if val_ceja == "1": text_ceja = "✅ Sí va a la Ceja"
-            elif val_ceja == "2": text_ceja = "🚫 ¡NI LOCAS mandarlo a la Ceja!"
-            else: text_ceja = "❌ No va normalmente"
-            
-            text_pirhua = "✅ Sí" if val_pirhua == "1" else "❌ No"
-            text_jpii = "✅ Sí" if val_jpii == "1" else "❌ No"
-            
             prioridad = "🔥 ALTA (Asignar primero)" if "fija" in val_flota.lower() else "⏳ BAJA (Asignar después)"
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.info("👤 **Datos Base**")
-                st.write(f"**Operador Logístico:** {val_ol}")
-                st.write(f"**Tipo de Flota:** {val_flota}")
-                st.write(f"**Prioridad de Asignación:** {prioridad}")
+            if ciudad_ruteo == "EA":
+                val_lento = str(info.iloc[1]).replace('.0', '').strip()
+                val_vuelta = str(info.iloc[2]).replace('.0', '').strip()
+                val_ceja = str(info.iloc[3]).replace('.0', '').strip()
+                val_pirhua = str(info.iloc[4]).replace('.0', '').strip()
+                val_jpii = str(info.iloc[5]).replace('.0', '').strip()
                 
-            with col2:
-                st.warning("⏱️ **Capacidad de Ruta**")
-                st.write(f"**Es Lento:** {text_lento}")
-                st.write(f"**Puede hacer 2 vueltas:** {text_vuelta}")
+                text_lento = "⚠️ Sí (Evitar rutas dispersas o largas)" if val_lento == "1" else "✅ No (Ruta normal)"
+                text_vuelta = "⚡ Sí (Vehículo rápido)" if val_vuelta == "1" else "Normal"
                 
-            with col3:
-                st.success("📍 **Restricciones de Zona**")
-                st.write(f"**La Ceja:** {text_ceja}")
-                st.write(f"**Partida Pirhua:** {text_pirhua}")
-                st.write(f"**Juan Pablo II:** {text_jpii}")
+                if val_ceja == "1": text_ceja = "✅ Sí va a la Ceja"
+                elif val_ceja == "2": text_ceja = "🚫 ¡NI LOCAS mandarlo a la Ceja!"
+                else: text_ceja = "❌ No va normalmente"
                 
+                text_pirhua = "✅ Sí" if val_pirhua == "1" else "❌ No"
+                text_jpii = "✅ Sí" if val_jpii == "1" else "❌ No"
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.info("👤 **Datos Base**")
+                    st.write(f"**Operador Logístico:** {val_ol}")
+                    st.write(f"**Tipo de Flota:** {val_flota}")
+                    st.write(f"**Prioridad de Asignación:** {prioridad}")
+                    
+                with col2:
+                    st.warning("⏱️ **Capacidad de Ruta**")
+                    st.write(f"**Es Lento:** {text_lento}")
+                    st.write(f"**Puede hacer 2 vueltas:** {text_vuelta}")
+                    
+                with col3:
+                    st.success("📍 **Restricciones de Zona**")
+                    st.write(f"**La Ceja:** {text_ceja}")
+                    st.write(f"**Partida Pirhua:** {text_pirhua}")
+                    st.write(f"**Juan Pablo II:** {text_jpii}")
+            else: # SI ES LP
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.info("👤 **Datos Base**")
+                    st.write(f"**Operador Logístico:** {val_ol}")
+                    st.write(f"**Tipo de Flota:** {val_flota}")
+                    st.write(f"**Prioridad de Asignación:** {prioridad}")
+                with col2:
+                    st.write("*(Los detalles específicos de zona y velocidad se aplican a EA)*")
     else:
         st.warning("Cargando la base de datos de camiones desde Drive...")
+
+    # 🔴 TABLA DE DISPONIBILIDAD DE FLOTA
+    st.divider()
+    st.subheader("📋 Disponibilidad de Flota")
+    st.caption("Pegue aquí la disponibilidad del día.")
+    
+    columnas_disp = ["Flota", "OL", "N° Camión", "Matrícula", "Tipo Camión", "Capacidad en Caja", 
+                     "Capacidad en Peso", "Zona de Entrega", "Status", "Tipo Ruta", "Prioridad", 
+                     "Observaciones", "Canal", "Codigo de la transportadora", "Transportadora", "Empresa"]
+    
+    df_disp_template = pd.DataFrame(columns=columnas_disp)
+    
+    df_disp = st.data_editor(
+        df_disp_template,
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        key="disponibilidad_editor"
+    )
 
 # ==========================================
 # 🗺️ MÓDULO DE MAPEO (TODO LO ANTERIOR)
@@ -416,7 +446,6 @@ elif st.session_state.pagina_actual == "Mapeo":
         st.header("Ruteo Parcial")
         archivo_parcial = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"], key="up_parcial", on_change=reset_parcial)
         
-        # 🔴 ADELANTOS ANTES DEL BOTÓN CON LA COLUMNA DE RUTA
         st.subheader("➕ Adelantos Manuales (Opcional)")
         df_adelantos_parcial = st.data_editor(pd.DataFrame(columns=["RUTA", "CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_parcial")
         
@@ -438,7 +467,6 @@ elif st.session_state.pagina_actual == "Mapeo":
         st.caption("Cargue 2 o más archivos simultáneamente.")
         archivos_completos = st.file_uploader("Cargue los archivos de ruteo (.xlsx)", type=["xlsx"], accept_multiple_files=True, key="up_completo", on_change=reset_completo)
         
-        # 🔴 ADELANTOS ANTES DEL BOTÓN CON LA COLUMNA DE RUTA
         st.subheader("➕ Adelantos Manuales (Opcional)")
         df_adelantos_completo = st.data_editor(pd.DataFrame(columns=["RUTA", "CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_completo")
         
@@ -468,7 +496,6 @@ elif st.session_state.pagina_actual == "Mapeo":
         aplicar_tratamiento = st.checkbox("⚙️ Archivo Crudo (Eliminar 5 primeras filas y forzar separación por comas)", value=True, key="chk_tratamiento_3308")
         st.caption("Desmarque esta casilla si la base YA está limpia.")
         
-        # 🔴 ADELANTOS ANTES DEL BOTÓN CON LA COLUMNA DE RUTA
         st.subheader("➕ Adelantos Manuales (Opcional)")
         df_adelantos_3308 = st.data_editor(pd.DataFrame(columns=["RUTA", "CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_3308")
         
