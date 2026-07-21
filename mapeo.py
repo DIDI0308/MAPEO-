@@ -158,30 +158,23 @@ def generar_imagen_tabla(df, titulo):
     plt.close(fig)
     return buf
 
-def modulo_ruteo(df_fox, sufijo_key):
+def modulo_ruteo(df_fox, sufijo_key, df_adelantos=None):
     col_ruta = df_fox.columns[0]
     col_cliente = df_fox.columns[1]
     col_cam = df_fox.columns[2]
     
-    # 🔴 ADELANTOS MANUALES
-    st.subheader("➕ Adelantos Manuales (Opcional)")
-    st.caption("Añada Código de Cliente y Camión. Se integrarán a la ruta y cruzarán automáticamente con VH y Geos.")
-    
-    df_adelantos_template = pd.DataFrame(columns=[col_cliente, col_cam])
-    df_adelantos = st.data_editor(
-        df_adelantos_template,
-        num_rows="dynamic",
-        use_container_width=True,
-        key=f"adelantos_{sufijo_key}"
-    )
-    
-    if not df_adelantos.empty:
-        df_ad_clean = df_adelantos.dropna(subset=[col_cliente, col_cam])
+    # 🔴 INTEGRACIÓN DE ADELANTOS
+    if df_adelantos is not None and not df_adelantos.empty:
+        # Limpiar filas vacías del componente de adelantos
+        df_ad_clean = df_adelantos.dropna(how='all')
         if not df_ad_clean.empty:
-            df_ad_clean[col_ruta] = "ADELANTO"
-            df_fox = pd.concat([df_fox, df_ad_clean[[col_ruta, col_cliente, col_cam]]], ignore_index=True)
+            df_ad_renamed = pd.DataFrame({
+                col_ruta: "ADELANTO",
+                col_cliente: df_ad_clean.iloc[:, 0],
+                col_cam: df_ad_clean.iloc[:, 1]
+            })
+            df_fox = pd.concat([df_fox, df_ad_renamed], ignore_index=True)
     
-    # 🔴 SOLUCIÓN AL ERROR DE MERGE (Estandarizar tipos a string puro antes de cruzar)
     df_fox[col_cliente] = df_fox[col_cliente].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
     
@@ -195,21 +188,23 @@ def modulo_ruteo(df_fox, sufijo_key):
     df_resumen = df_ruteo.groupby([col_cam, col_ruta])[col_cliente].count().reset_index()
     df_resumen.rename(columns={col_cliente: "N° de PDVs a Visitar"}, inplace=True)
     
-    # Cargar y proteger datos del drive
     df_clientes = cargar_base_clientes().copy() 
     df_clientes['CLIID'] = df_clientes['CLIID'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     
-    # Merge seguro
     df_merged = pd.merge(df_ruteo, df_clientes, left_on=col_cliente, right_on='CLIID', how='left')
     
     df_final = df_merged[[col_ruta, col_cliente, col_cam, 'CLIDOM', 'TELEFONO', 'X', 'Y']].copy()
     
-    # 🔴 NOMBRES DE COLUMNAS ESTÁNDAR PARA GOOGLE MY MAPS
     df_final.rename(columns={'CLIDOM': 'DIRECCION', 'TELEFONO': 'NUMERO', 'X': 'Longitude', 'Y': 'Latitude'}, inplace=True)
 
+    # Convertimos numéricamente solo para el mapa de Streamlit
     df_final['Latitude'] = pd.to_numeric(df_final['Latitude'], errors='coerce')
     df_final['Longitude'] = pd.to_numeric(df_final['Longitude'], errors='coerce')
     df_mapa = df_final.dropna(subset=['Latitude', 'Longitude'])
+
+    # 🔴 SOLUCIÓN MY MAPS: Forzar las coordenadas a ser TEXTO PURO antes de exportar
+    df_final['Latitude'] = df_final['Latitude'].apply(lambda x: f"{x}" if pd.notnull(x) else "")
+    df_final['Longitude'] = df_final['Longitude'].apply(lambda x: f"{x}" if pd.notnull(x) else "")
 
     col_izq, col_der = st.columns([1, 1.5])
     with col_izq:
@@ -240,7 +235,7 @@ def modulo_ruteo(df_fox, sufijo_key):
         st.subheader("🗺️ Exportación a My Maps")
         fecha_hoy = datetime.now().strftime("%d/%m/%Y")
         nombre_mapa = f"MAPA({fecha_hoy})"
-        st.info(f"**Pasos para My Maps:**\n1. Descargue los archivos Excel inferiores *(My Maps reconocerá automáticamente las columnas de Latitude/Longitude)*.\n2. Abra **Google My Maps**.\n3. Copie y pegue este nombre: **`{nombre_mapa}`**\n4. Importe el Excel y agrupe por `CAM`.")
+        st.info(f"**Pasos para My Maps:**\n1. Descargue los archivos Excel inferiores *(My Maps reconocerá automáticamente las coordenadas)*.\n2. Abra **Google My Maps**.\n3. Copie y pegue este nombre: **`{nombre_mapa}`**\n4. Importe el Excel y agrupe por `CAM`.")
         
         rutas_unicas = df_final[col_ruta].unique()
         if len(rutas_unicas) > 20:
@@ -421,6 +416,10 @@ elif st.session_state.pagina_actual == "Mapeo":
         st.header("Ruteo Parcial")
         archivo_parcial = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"], key="up_parcial", on_change=reset_parcial)
         
+        # 🔴 ADELANTOS ANTES DEL BOTÓN
+        st.subheader("➕ Adelantos Manuales (Opcional)")
+        df_adelantos_parcial = st.data_editor(pd.DataFrame(columns=["CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_parcial")
+        
         if archivo_parcial is not None:
             if st.button("▶️ Procesar Parcial", type="primary", key="btn_parcial"):
                 st.session_state.procesar_parcial = True
@@ -429,7 +428,7 @@ elif st.session_state.pagina_actual == "Mapeo":
                     with st.spinner("Procesando matriz de datos..."):
                         archivo_parcial.seek(0)
                         df_fox = pd.read_excel(archivo_parcial, sheet_name="FOX", usecols="A:C")
-                        modulo_ruteo(df_fox, "parcial")
+                        modulo_ruteo(df_fox, "parcial", df_adelantos_parcial)
                         modulo_vh_fijas(archivo_parcial, "parcial")
                 except Exception as e:
                     st.error(f"Falla en el procesamiento: {e}")
@@ -438,6 +437,10 @@ elif st.session_state.pagina_actual == "Mapeo":
         st.header("Ruteo Completo")
         st.caption("Cargue 2 o más archivos simultáneamente.")
         archivos_completos = st.file_uploader("Cargue los archivos de ruteo (.xlsx)", type=["xlsx"], accept_multiple_files=True, key="up_completo", on_change=reset_completo)
+        
+        # 🔴 ADELANTOS ANTES DEL BOTÓN
+        st.subheader("➕ Adelantos Manuales (Opcional)")
+        df_adelantos_completo = st.data_editor(pd.DataFrame(columns=["CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_completo")
         
         if archivos_completos and len(archivos_completos) > 0:
             if st.button("▶️ Procesar Completo", type="primary", key="btn_completo"):
@@ -452,7 +455,7 @@ elif st.session_state.pagina_actual == "Mapeo":
                             df_temp.columns = ["RUTA", "CLIENTE", "CAM"]
                             lista_dfs.append(df_temp)
                         df_fox_completo = pd.concat(lista_dfs, ignore_index=True)
-                        modulo_ruteo(df_fox_completo, "completo")
+                        modulo_ruteo(df_fox_completo, "completo", df_adelantos_completo)
                         modulo_vh_fijas(archivos_completos, "completo")
                 except Exception as e:
                     st.error(f"Falla en el procesamiento: {e}")
@@ -464,6 +467,10 @@ elif st.session_state.pagina_actual == "Mapeo":
         selector_ciudad = st.radio("📍 Seleccione la Región para el filtro de camiones:", ["EA", "LP"], key="ciudad_3308", horizontal=True)
         aplicar_tratamiento = st.checkbox("⚙️ Archivo Crudo (Eliminar 5 primeras filas y forzar separación por comas)", value=True, key="chk_tratamiento_3308")
         st.caption("Desmarque esta casilla si la base YA está limpia.")
+        
+        # 🔴 ADELANTOS ANTES DEL BOTÓN
+        st.subheader("➕ Adelantos Manuales (Opcional)")
+        df_adelantos_3308 = st.data_editor(pd.DataFrame(columns=["CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_3308")
         
         if archivo_3308 is not None:
             if st.button("▶️ Procesar 3308", type="primary", key="btn_3308"):
@@ -517,7 +524,7 @@ elif st.session_state.pagina_actual == "Mapeo":
                             df_fox_temp['RUTA'] = df_fox_temp['CAM']
                             
                             df_fox = df_fox_temp[["RUTA", "CLIENTE", "CAM"]].copy()
-                            modulo_ruteo(df_fox, "3308")
+                            modulo_ruteo(df_fox, "3308", df_adelantos_3308)
                             
                             if archivo_3308.name.lower().endswith('.xlsx'): modulo_vh_fijas(archivo_3308, "3308")
                         else:
@@ -606,4 +613,3 @@ elif st.session_state.pagina_actual == "Mapeo":
             st.success("Pedidos procesados:")
             st.code(mensaje_wp_pedidos, language="text")
         else: st.info("Pegue datos antes de procesar.")
-            
