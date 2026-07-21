@@ -128,8 +128,9 @@ def cargar_datos_camiones_info():
         st.error(f"No se pudo cargar la base de datos de camiones: {e}")
         return pd.DataFrame()
 
-def generar_imagen_tabla(df, titulo):
-    fig, ax = plt.subplots(figsize=(14, len(df) * 0.4 + 1.5))
+# 🔴 FUNCIÓN DE IMAGEN MEJORADA (Colores, márgenes cerrados y resaltados)
+def generar_imagen_tabla(df, titulo, col_critica_nombre=None, color_critica=None, col_camion_nombre=None):
+    fig, ax = plt.subplots(figsize=(10, len(df) * 0.4 + 1.5))
     ax.axis('tight')
     ax.axis('off')
     
@@ -141,19 +142,33 @@ def generar_imagen_tabla(df, titulo):
     tabla.set_fontsize(10)
     tabla.scale(1, 1.8) 
     
+    # Identificar índices de las columnas a pintar
+    idx_critica = list(df.columns).index(col_critica_nombre) if col_critica_nombre in df.columns else -1
+    idx_camion = list(df.columns).index(col_camion_nombre) if col_camion_nombre in df.columns else -1
+    
+    # Pintar cabeceras
     for i in range(len(df.columns)):
         tabla[(0, i)].set_facecolor("#2c3e50")
         tabla[(0, i)].set_text_props(color="white", weight="bold")
     
+    # Pintar contenido con lógica de resaltado
     for i in range(1, len(df_str) + 1):
         for j in range(len(df.columns)):
-            if i % 2 == 0:
-                tabla[(i, j)].set_facecolor("#ecf0f1")
+            bg_color = "#ecf0f1" if i % 2 == 0 else "white"  # Patrón cebra por defecto
+            
+            # Prioridad de color: Primero Críticas (Rojo/Verde), luego Camión (Amarillo)
+            if j == idx_critica and color_critica:
+                bg_color = color_critica
+            elif j == idx_camion:
+                bg_color = "#fff2cc"  # Amarillo pastel para los camiones
+                
+            tabla[(i, j)].set_facecolor(bg_color)
                 
     plt.title(titulo, fontsize=14, weight='bold', pad=20)
     
     buf = io.BytesIO()
-    plt.savefig(buf, format="png", bbox_inches="tight", dpi=150)
+    # bbox_inches="tight" con pad mínimo recorta la imagen quitando espacios blancos laterales
+    plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.02, dpi=200)
     buf.seek(0)
     plt.close(fig)
     return buf
@@ -163,18 +178,16 @@ def modulo_ruteo(df_fox, sufijo_key, df_adelantos=None):
     col_cliente = df_fox.columns[1]
     col_cam = df_fox.columns[2]
     
-    # 🔴 INTEGRACIÓN DE ADELANTOS
     if df_adelantos is not None and not df_adelantos.empty:
         df_ad_clean = df_adelantos.dropna(how='all')
         if not df_ad_clean.empty:
             df_ad_renamed = pd.DataFrame({
-                col_ruta: df_ad_clean.iloc[:, 0],    # RUTA
-                col_cliente: df_ad_clean.iloc[:, 1], # CLIENTE
-                col_cam: df_ad_clean.iloc[:, 2]      # CAMION
+                col_ruta: df_ad_clean.iloc[:, 0],    
+                col_cliente: df_ad_clean.iloc[:, 1], 
+                col_cam: df_ad_clean.iloc[:, 2]      
             })
             df_fox = pd.concat([df_fox, df_ad_renamed], ignore_index=True)
     
-    # 🔴 LIMPIEZA RIGUROSA PARA QUE MY MAPS AGRUPE PERFECTAMENTE LAS RUTAS
     df_fox[col_ruta] = df_fox[col_ruta].astype(str).str.strip().str.upper()
     df_fox[col_cliente] = df_fox[col_cliente].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
@@ -300,11 +313,15 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
         with col_vh1:
             st.write("**Críticas (SI)**"); st.dataframe(df_criticas, use_container_width=True)
             if not df_criticas.empty:
-                st.download_button(label="🖼️ Descargar Críticas", data=generar_imagen_tabla(df_criticas, "VH Críticas").getvalue(), file_name="VH_Criticas.png", mime="image/png", use_container_width=True, key=f"img_crit_{sufijo_key}")
+                # 🔴 Aplicando colores para Críticas (Rojo pastel) y Camión (Amarillo pastel)
+                img_buf = generar_imagen_tabla(df_criticas, "VH Críticas", col_critica_nombre=col_f, color_critica="#ffcccc", col_camion_nombre=col_cam_vh)
+                st.download_button(label="🖼️ Descargar Críticas", data=img_buf.getvalue(), file_name="VH_Criticas.png", mime="image/png", use_container_width=True, key=f"img_crit_{sufijo_key}")
         with col_vh2:
             st.write("**VH a Considerar (NO)**"); st.dataframe(df_considerar, use_container_width=True)
             if not df_considerar.empty:
-                st.download_button(label="🖼️ Descargar VH Considerar", data=generar_imagen_tabla(df_considerar, "VH Considerar").getvalue(), file_name="VH_Considerar.png", mime="image/png", use_container_width=True, key=f"img_cons_{sufijo_key}")
+                # 🔴 Aplicando colores para Considerar (Verde pastel) y Camión (Amarillo pastel)
+                img_buf = generar_imagen_tabla(df_considerar, "VH Considerar", col_critica_nombre=col_f, color_critica="#ccffcc", col_camion_nombre=col_cam_vh)
+                st.download_button(label="🖼️ Descargar VH Considerar", data=img_buf.getvalue(), file_name="VH_Considerar.png", mime="image/png", use_container_width=True, key=f"img_cons_{sufijo_key}")
     except ValueError: st.warning("No se encontró la hoja 'VH FIJAS'.")
     except Exception as e: st.error(f"Error procesando Ventanas Horarias Fijas: {e}")
 
@@ -332,7 +349,7 @@ if st.session_state.pagina_actual == "Inicio":
 
 
 # ==========================================
-# 🛣️ MÓDULO DE RUTEO (NUEVO)
+# 🛣️ MÓDULO DE RUTEO
 # ==========================================
 
 elif st.session_state.pagina_actual == "Ruteo":
@@ -406,7 +423,6 @@ elif st.session_state.pagina_actual == "Ruteo":
     else:
         st.warning("Cargando la base de datos de camiones desde Drive...")
 
-    # 🔴 TABLA DE DISPONIBILIDAD DE FLOTA
     st.divider()
     st.subheader("📋 Disponibilidad de Flota")
     st.caption("Pegue aquí la disponibilidad del día.")
@@ -426,7 +442,7 @@ elif st.session_state.pagina_actual == "Ruteo":
     )
 
 # ==========================================
-# 🗺️ MÓDULO DE MAPEO (TODO LO ANTERIOR)
+# 🗺️ MÓDULO DE MAPEO
 # ==========================================
 
 elif st.session_state.pagina_actual == "Mapeo":
@@ -492,7 +508,7 @@ elif st.session_state.pagina_actual == "Mapeo":
         st.header("RUTEO 3308")
         archivo_3308 = st.file_uploader("Cargue el archivo maestro de ruteo 3308 (.csv o .xlsx)", type=["csv", "xlsx"], key="up_3308", on_change=reset_3308)
         
-        selector_ciudad = st.radio("📍 Seleccione la Región para el filtro de camiones:", ["EA", "LP"], key="ciudad_3308", horizontal=True)
+        selector_ciudad = st.radio("📍 Seleccione la Región para el filtro de camiones:", ["EA", "LP"], key="ciudad_3308_mapeo", horizontal=True)
         aplicar_tratamiento = st.checkbox("⚙️ Archivo Crudo (Eliminar 5 primeras filas y forzar separación por comas)", value=True, key="chk_tratamiento_3308")
         st.caption("Desmarque esta casilla si la base YA está limpia.")
         
@@ -600,10 +616,22 @@ elif st.session_state.pagina_actual == "Mapeo":
                             if buscador_cliente: df_filtrado_ev = df_filtrado_ev[df_filtrado_ev[col_cliente_ev].astype(str).str.contains(buscador_cliente.strip(), case=False, na=False)]
                             st.success(f"Mostrando {len(df_filtrado_ev)} registros para el {fecha_elegida.strftime('%d/%m/%Y')}")
                             st.dataframe(df_filtrado_ev, use_container_width=True)
+                            
                             if not df_filtrado_ev.empty:
                                 df_imagen_ev = df_filtrado_ev.copy()
+                                
+                                # 🔴 ELIMINAR COLUMNA "MARCA TEMPORAL" PARA LA IMAGEN
+                                if col_fecha in df_imagen_ev.columns:
+                                    df_imagen_ev = df_imagen_ev.drop(columns=[col_fecha])
+                                for col in df_imagen_ev.columns:
+                                    if "marca temporal" in str(col).lower():
+                                        df_imagen_ev = df_imagen_ev.drop(columns=[col])
+                                
                                 if len(df_imagen_ev.columns) >= 6: df_imagen_ev = df_imagen_ev.drop(columns=df_imagen_ev.columns[3:6])
-                                st.download_button("🖼️ Descargar Reporte", generar_imagen_tabla(df_imagen_ev, f"VH Eventuales - {fecha_elegida}").getvalue(), f"VH_Eventuales_{fecha_elegida}.png", "image/png", use_container_width=True, key="dl_img_ev")
+                                
+                                # 🔴 RESALTAR CAMIÓN (AMARILLO) EN VH EVENTUALES
+                                img_ev_buf = generar_imagen_tabla(df_imagen_ev, f"VH Eventuales - {fecha_elegida}", col_camion_nombre='CAMIÓN ASIGNADO')
+                                st.download_button("🖼️ Descargar Reporte", img_ev_buf.getvalue(), f"VH_Eventuales_{fecha_elegida}.png", "image/png", use_container_width=True, key="dl_img_ev")
                     else: st.warning("El ZIP no contiene un archivo .csv o .xlsx.")
             except Exception as e: st.error(f"Error al procesar el archivo: {e}")
 
