@@ -128,7 +128,6 @@ def cargar_datos_camiones_info():
         st.error(f"No se pudo cargar la base de datos de camiones: {e}")
         return pd.DataFrame()
 
-# 🔴 FUNCIÓN DE IMAGEN MEJORADA (Colores, márgenes cerrados y resaltados)
 def generar_imagen_tabla(df, titulo, col_critica_nombre=None, color_critica=None, col_camion_nombre=None):
     fig, ax = plt.subplots(figsize=(10, len(df) * 0.4 + 1.5))
     ax.axis('tight')
@@ -142,32 +141,27 @@ def generar_imagen_tabla(df, titulo, col_critica_nombre=None, color_critica=None
     tabla.set_fontsize(10)
     tabla.scale(1, 1.8) 
     
-    # Identificar índices de las columnas a pintar
     idx_critica = list(df.columns).index(col_critica_nombre) if col_critica_nombre in df.columns else -1
     idx_camion = list(df.columns).index(col_camion_nombre) if col_camion_nombre in df.columns else -1
     
-    # Pintar cabeceras
     for i in range(len(df.columns)):
         tabla[(0, i)].set_facecolor("#2c3e50")
         tabla[(0, i)].set_text_props(color="white", weight="bold")
     
-    # Pintar contenido con lógica de resaltado
     for i in range(1, len(df_str) + 1):
         for j in range(len(df.columns)):
-            bg_color = "#ecf0f1" if i % 2 == 0 else "white"  # Patrón cebra por defecto
+            bg_color = "#ecf0f1" if i % 2 == 0 else "white"  
             
-            # Prioridad de color: Primero Críticas (Rojo/Verde), luego Camión (Amarillo)
             if j == idx_critica and color_critica:
                 bg_color = color_critica
             elif j == idx_camion:
-                bg_color = "#fff2cc"  # Amarillo pastel para los camiones
+                bg_color = "#fff2cc"  
                 
             tabla[(i, j)].set_facecolor(bg_color)
                 
     plt.title(titulo, fontsize=14, weight='bold', pad=20)
     
     buf = io.BytesIO()
-    # bbox_inches="tight" con pad mínimo recorta la imagen quitando espacios blancos laterales
     plt.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.02, dpi=200)
     buf.seek(0)
     plt.close(fig)
@@ -313,13 +307,11 @@ def modulo_vh_fijas(archivo_subido, sufijo_key):
         with col_vh1:
             st.write("**Críticas (SI)**"); st.dataframe(df_criticas, use_container_width=True)
             if not df_criticas.empty:
-                # 🔴 Aplicando colores para Críticas (Rojo pastel) y Camión (Amarillo pastel)
                 img_buf = generar_imagen_tabla(df_criticas, "VH Críticas", col_critica_nombre=col_f, color_critica="#ffcccc", col_camion_nombre=col_cam_vh)
                 st.download_button(label="🖼️ Descargar Críticas", data=img_buf.getvalue(), file_name="VH_Criticas.png", mime="image/png", use_container_width=True, key=f"img_crit_{sufijo_key}")
         with col_vh2:
             st.write("**VH a Considerar (NO)**"); st.dataframe(df_considerar, use_container_width=True)
             if not df_considerar.empty:
-                # 🔴 Aplicando colores para Considerar (Verde pastel) y Camión (Amarillo pastel)
                 img_buf = generar_imagen_tabla(df_considerar, "VH Considerar", col_critica_nombre=col_f, color_critica="#ccffcc", col_camion_nombre=col_cam_vh)
                 st.download_button(label="🖼️ Descargar VH Considerar", data=img_buf.getvalue(), file_name="VH_Considerar.png", mime="image/png", use_container_width=True, key=f"img_cons_{sufijo_key}")
     except ValueError: st.warning("No se encontró la hoja 'VH FIJAS'.")
@@ -359,87 +351,153 @@ elif st.session_state.pagina_actual == "Ruteo":
     
     ciudad_ruteo = st.radio("📍 Seleccione la Ciudad Operativa:", ["EA", "LP"], horizontal=True)
     
-    st.write("Consulta y validación de las características de cada unidad operativa.")
+    # 🔴 PASO 1: DISPONIBILIDAD DE FLOTA
+    st.divider()
+    st.subheader("📋 Paso 1: Disponibilidad de Flota")
+    st.write("Suba el archivo Excel de disponibilidad diaria. El sistema filtrará automáticamente los camiones 'Disponibles'.")
+    
+    archivo_dispo = st.file_uploader("📥 Subir Excel de Disponibilidad", type=["xlsx", "xls"], key="up_dispo")
+    
+    df_disp = pd.DataFrame()
+    
+    if archivo_dispo is not None:
+        try:
+            # Buscar inteligentemente la fila de encabezados
+            df_raw = pd.read_excel(archivo_dispo, header=None)
+            header_idx = 0
+            for i, row in df_raw.iterrows():
+                if row.astype(str).str.contains("Status|N° Camión|N° Camion", case=False, na=False).any():
+                    header_idx = i
+                    break
+            
+            archivo_dispo.seek(0)
+            df_disp = pd.read_excel(archivo_dispo, skiprows=header_idx)
+            
+            st.success("✅ Archivo procesado correctamente.")
+            with st.expander("Ver base cargada"):
+                st.dataframe(df_disp, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error leyendo el archivo: {e}")
+    else:
+        st.caption("O pegue aquí la disponibilidad si no tiene el archivo a mano:")
+        columnas_disp = ["Flota", "OL", "N° Camión", "Matrícula", "Tipo Camión", "Capacidad en Caja", 
+                         "Capacidad en Peso", "Zona de Entrega", "Status", "Tipo Ruta", "Prioridad", 
+                         "Observaciones", "Canal", "Codigo de la transportadora", "Transportadora", "Empresa"]
+        
+        df_disp_template = pd.DataFrame(columns=columnas_disp)
+        df_disp = st.data_editor(
+            df_disp_template,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            key="disponibilidad_editor"
+        )
+    
+    # 🔴 PASO 2: ASIGNACIÓN Y CONSULTA
+    st.divider()
+    st.subheader("🔍 Paso 2: Consulta de Unidades Habilitadas")
+    st.write("Consulta las características y capacidad de las unidades habilitadas para hoy.")
     
     df_camiones = cargar_datos_camiones_info()
     
     if not df_camiones.empty:
-        lista_camiones = df_camiones.iloc[:, 0].dropna().astype(str).tolist()
-        lista_camiones = sorted(list(set(lista_camiones)))
+        camiones_habilitados = []
+        dict_disp_info = {}
         
-        camion_sel = st.selectbox("🔍 Seleccione la unidad (Código de Camión):", [""] + lista_camiones)
+        if not df_disp.empty:
+            # Identificar dinámicamente las columnas clave por si cambian ligeramente en el Excel
+            col_cam = next((c for c in df_disp.columns if 'CAMI' in str(c).upper()), 'N° Camión')
+            col_status = next((c for c in df_disp.columns if 'STATUS' in str(c).upper()), 'Status')
+            col_tipo = next((c for c in df_disp.columns if 'TIPO' in str(c).upper() and 'CAMI' in str(c).upper()), 'Tipo Camión')
+            col_peso = next((c for c in df_disp.columns if 'PESO' in str(c).upper()), 'Capacidad en Peso')
+
+            if col_cam in df_disp.columns and col_status in df_disp.columns:
+                disp_clean = df_disp.copy()
+                disp_clean[col_status] = disp_clean[col_status].astype(str).str.strip().str.upper()
+                disp_clean[col_cam] = disp_clean[col_cam].astype(str).str.strip().str.upper()
+                
+                # Filtrado de camiones disponibles
+                df_solo_disp = disp_clean[disp_clean[col_status] == 'DISPONIBLE']
+                camiones_habilitados = df_solo_disp[col_cam].tolist()
+                
+                for _, row in df_solo_disp.iterrows():
+                    cam = row[col_cam]
+                    dict_disp_info[cam] = {
+                        "tipo": str(row.get(col_tipo, 'N/D')).strip(),
+                        "peso": str(row.get(col_peso, 'N/D')).replace('.0', '').strip()
+                    }
         
-        if camion_sel:
-            st.markdown("---")
-            info = df_camiones[df_camiones.iloc[:, 0].astype(str) == camion_sel].iloc[0]
+        if camiones_habilitados:
+            camion_sel = st.selectbox("🚛 Seleccione una unidad habilitada:", [""] + sorted(list(set(camiones_habilitados))))
             
-            val_ol = str(info.iloc[6]).strip()
-            val_flota = str(info.iloc[7]).strip()
-            prioridad = "🔥 ALTA (Asignar primero)" if "fija" in val_flota.lower() else "⏳ BAJA (Asignar después)"
-            
-            if ciudad_ruteo == "EA":
-                val_lento = str(info.iloc[1]).replace('.0', '').strip()
-                val_vuelta = str(info.iloc[2]).replace('.0', '').strip()
-                val_ceja = str(info.iloc[3]).replace('.0', '').strip()
-                val_pirhua = str(info.iloc[4]).replace('.0', '').strip()
-                val_jpii = str(info.iloc[5]).replace('.0', '').strip()
+            if camion_sel:
+                st.markdown("---")
                 
-                text_lento = "⚠️ Sí (Evitar rutas dispersas o largas)" if val_lento == "1" else "✅ No (Ruta normal)"
-                text_vuelta = "⚡ Sí (Vehículo rápido)" if val_vuelta == "1" else "Normal"
+                info_estatica = df_camiones[df_camiones.iloc[:, 0].astype(str).str.strip().str.upper() == camion_sel]
                 
-                if val_ceja == "1": text_ceja = "✅ Sí va a la Ceja"
-                elif val_ceja == "2": text_ceja = "🚫 ¡NI LOCAS mandarlo a la Ceja!"
-                else: text_ceja = "❌ No va normalmente"
+                val_ol = "N/D"
+                val_flota = "N/D"
+                text_lento = "N/D"
+                text_vuelta = "N/D"
+                text_ceja = "N/D"
+                text_pirhua = "N/D"
+                text_jpii = "N/D"
+                prioridad = "N/D"
                 
-                text_pirhua = "✅ Sí" if val_pirhua == "1" else "❌ No"
-                text_jpii = "✅ Sí" if val_jpii == "1" else "❌ No"
+                if not info_estatica.empty:
+                    info = info_estatica.iloc[0]
+                    val_ol = str(info.iloc[6]).strip()
+                    val_flota = str(info.iloc[7]).strip()
+                    prioridad = "🔥 ALTA (Asignar primero)" if "fija" in val_flota.lower() else "⏳ BAJA (Asignar después)"
+                    
+                    val_lento = str(info.iloc[1]).replace('.0', '').strip()
+                    val_vuelta = str(info.iloc[2]).replace('.0', '').strip()
+                    val_ceja = str(info.iloc[3]).replace('.0', '').strip()
+                    val_pirhua = str(info.iloc[4]).replace('.0', '').strip()
+                    val_jpii = str(info.iloc[5]).replace('.0', '').strip()
+                    
+                    text_lento = "⚠️ Sí (Evitar dispersión)" if val_lento == "1" else "✅ No (Normal)"
+                    text_vuelta = "⚡ Sí (Vehículo rápido)" if val_vuelta == "1" else "Normal"
+                    
+                    if val_ceja == "1": text_ceja = "✅ Sí va a la Ceja"
+                    elif val_ceja == "2": text_ceja = "🚫 ¡NI LOCAS a la Ceja!"
+                    else: text_ceja = "❌ No va normalmente"
+                    
+                    text_pirhua = "✅ Sí" if val_pirhua == "1" else "❌ No"
+                    text_jpii = "✅ Sí" if val_jpii == "1" else "❌ No"
+                else:
+                    st.warning("⚠️ Este camión está disponible, pero no tiene registro en la base maestra de restricciones (Drive).")
+
+                info_disp_actual = dict_disp_info.get(camion_sel, {"tipo": "N/D", "peso": "N/D"})
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.info("👤 **Datos Base**")
+                    st.info("👤 **Datos Base y Dispo**")
                     st.write(f"**Operador Logístico:** {val_ol}")
                     st.write(f"**Tipo de Flota:** {val_flota}")
-                    st.write(f"**Prioridad de Asignación:** {prioridad}")
+                    st.write(f"**Prioridad:** {prioridad}")
+                    st.write(f"**Tipo Camión:** {info_disp_actual['tipo']}")
+                    st.write(f"**Capacidad Peso:** {info_disp_actual['peso']} kg")
                     
-                with col2:
-                    st.warning("⏱️ **Capacidad de Ruta**")
-                    st.write(f"**Es Lento:** {text_lento}")
-                    st.write(f"**Puede hacer 2 vueltas:** {text_vuelta}")
-                    
-                with col3:
-                    st.success("📍 **Restricciones de Zona**")
-                    st.write(f"**La Ceja:** {text_ceja}")
-                    st.write(f"**Partida Pirhua:** {text_pirhua}")
-                    st.write(f"**Juan Pablo II:** {text_jpii}")
-            else: # SI ES LP
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.info("👤 **Datos Base**")
-                    st.write(f"**Operador Logístico:** {val_ol}")
-                    st.write(f"**Tipo de Flota:** {val_flota}")
-                    st.write(f"**Prioridad de Asignación:** {prioridad}")
-                with col2:
-                    st.write("*(Los detalles específicos de zona y velocidad se aplican a EA)*")
+                if ciudad_ruteo == "EA":
+                    with col2:
+                        st.warning("⏱️ **Capacidad de Ruta**")
+                        st.write(f"**Es Lento:** {text_lento}")
+                        st.write(f"**Puede hacer 2 vueltas:** {text_vuelta}")
+                        
+                    with col3:
+                        st.success("📍 **Restricciones de Zona**")
+                        st.write(f"**La Ceja:** {text_ceja}")
+                        st.write(f"**Partida Pirhua:** {text_pirhua}")
+                        st.write(f"**Juan Pablo II:** {text_jpii}")
+                else: 
+                    with col2:
+                        st.write("*(Los detalles específicos de zona y velocidad se aplican a EA)*")
+        else:
+            st.info("No hay camiones disponibles. Asegúrese de cargar un Excel válido o pegar la disponibilidad arriba.")
     else:
         st.warning("Cargando la base de datos de camiones desde Drive...")
 
-    st.divider()
-    st.subheader("📋 Disponibilidad de Flota")
-    st.caption("Pegue aquí la disponibilidad del día.")
-    
-    columnas_disp = ["Flota", "OL", "N° Camión", "Matrícula", "Tipo Camión", "Capacidad en Caja", 
-                     "Capacidad en Peso", "Zona de Entrega", "Status", "Tipo Ruta", "Prioridad", 
-                     "Observaciones", "Canal", "Codigo de la transportadora", "Transportadora", "Empresa"]
-    
-    df_disp_template = pd.DataFrame(columns=columnas_disp)
-    
-    df_disp = st.data_editor(
-        df_disp_template,
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True,
-        key="disponibilidad_editor"
-    )
 
 # ==========================================
 # 🗺️ MÓDULO DE MAPEO
@@ -620,7 +678,6 @@ elif st.session_state.pagina_actual == "Mapeo":
                             if not df_filtrado_ev.empty:
                                 df_imagen_ev = df_filtrado_ev.copy()
                                 
-                                # 🔴 ELIMINAR COLUMNA "MARCA TEMPORAL" PARA LA IMAGEN
                                 if col_fecha in df_imagen_ev.columns:
                                     df_imagen_ev = df_imagen_ev.drop(columns=[col_fecha])
                                 for col in df_imagen_ev.columns:
@@ -629,7 +686,6 @@ elif st.session_state.pagina_actual == "Mapeo":
                                 
                                 if len(df_imagen_ev.columns) >= 6: df_imagen_ev = df_imagen_ev.drop(columns=df_imagen_ev.columns[3:6])
                                 
-                                # 🔴 RESALTAR CAMIÓN (AMARILLO) EN VH EVENTUALES
                                 img_ev_buf = generar_imagen_tabla(df_imagen_ev, f"VH Eventuales - {fecha_elegida}", col_camion_nombre='CAMIÓN ASIGNADO')
                                 st.download_button("🖼️ Descargar Reporte", img_ev_buf.getvalue(), f"VH_Eventuales_{fecha_elegida}.png", "image/png", use_container_width=True, key="dl_img_ev")
                     else: st.warning("El ZIP no contiene un archivo .csv o .xlsx.")
