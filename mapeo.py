@@ -163,7 +163,7 @@ def modulo_ruteo(df_fox, sufijo_key):
     col_cliente = df_fox.columns[1]
     col_cam = df_fox.columns[2]
     
-    # 🔴 NUEVO: SECCIÓN DE ADELANTOS ANTES DE PROCESAR
+    # 🔴 ADELANTOS MANUALES
     st.subheader("➕ Adelantos Manuales (Opcional)")
     st.caption("Añada Código de Cliente y Camión. Se integrarán a la ruta y cruzarán automáticamente con VH y Geos.")
     
@@ -181,7 +181,8 @@ def modulo_ruteo(df_fox, sufijo_key):
             df_ad_clean[col_ruta] = "ADELANTO"
             df_fox = pd.concat([df_fox, df_ad_clean[[col_ruta, col_cliente, col_cam]]], ignore_index=True)
     
-    # Continuación normal del código de ruteo
+    # 🔴 SOLUCIÓN AL ERROR DE MERGE (Estandarizar tipos a string puro antes de cruzar)
+    df_fox[col_cliente] = df_fox[col_cliente].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     df_fox[col_cam] = df_fox[col_cam].astype(str).str.strip().str.upper()
     
     st.session_state.df_cruce_fox = df_fox[[col_cliente, col_cam]].drop_duplicates(subset=[col_cliente])
@@ -194,12 +195,16 @@ def modulo_ruteo(df_fox, sufijo_key):
     df_resumen = df_ruteo.groupby([col_cam, col_ruta])[col_cliente].count().reset_index()
     df_resumen.rename(columns={col_cliente: "N° de PDVs a Visitar"}, inplace=True)
     
-    df_clientes = cargar_base_clientes()
+    # Cargar y proteger datos del drive
+    df_clientes = cargar_base_clientes().copy() 
+    df_clientes['CLIID'] = df_clientes['CLIID'].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+    
+    # Merge seguro
     df_merged = pd.merge(df_ruteo, df_clientes, left_on=col_cliente, right_on='CLIID', how='left')
     
     df_final = df_merged[[col_ruta, col_cliente, col_cam, 'CLIDOM', 'TELEFONO', 'X', 'Y']].copy()
     
-    # 🔴 CORRECCIÓN MY MAPS: Nombres estándar en inglés y conversión pura numérica
+    # 🔴 NOMBRES DE COLUMNAS ESTÁNDAR PARA GOOGLE MY MAPS
     df_final.rename(columns={'CLIDOM': 'DIRECCION', 'TELEFONO': 'NUMERO', 'X': 'Longitude', 'Y': 'Latitude'}, inplace=True)
 
     df_final['Latitude'] = pd.to_numeric(df_final['Latitude'], errors='coerce')
@@ -601,3 +606,4 @@ elif st.session_state.pagina_actual == "Mapeo":
             st.success("Pedidos procesados:")
             st.code(mensaje_wp_pedidos, language="text")
         else: st.info("Pegue datos antes de procesar.")
+            
