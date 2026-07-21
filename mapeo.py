@@ -169,9 +169,9 @@ def modulo_ruteo(df_fox, sufijo_key, df_adelantos=None):
         df_ad_clean = df_adelantos.dropna(how='all')
         if not df_ad_clean.empty:
             df_ad_renamed = pd.DataFrame({
-                col_ruta: "ADELANTO",
-                col_cliente: df_ad_clean.iloc[:, 0],
-                col_cam: df_ad_clean.iloc[:, 1]
+                col_ruta: df_ad_clean.iloc[:, 0],    # RUTA proporcionada por el usuario
+                col_cliente: df_ad_clean.iloc[:, 1], # CLIENTE
+                col_cam: df_ad_clean.iloc[:, 2]      # CAMION
             })
             df_fox = pd.concat([df_fox, df_ad_renamed], ignore_index=True)
     
@@ -416,9 +416,9 @@ elif st.session_state.pagina_actual == "Mapeo":
         st.header("Ruteo Parcial")
         archivo_parcial = st.file_uploader("Cargue el archivo maestro de ruteo (.xlsx)", type=["xlsx"], key="up_parcial", on_change=reset_parcial)
         
-        # 🔴 ADELANTOS ANTES DEL BOTÓN
+        # 🔴 ADELANTOS ANTES DEL BOTÓN CON LA COLUMNA DE RUTA
         st.subheader("➕ Adelantos Manuales (Opcional)")
-        df_adelantos_parcial = st.data_editor(pd.DataFrame(columns=["CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_parcial")
+        df_adelantos_parcial = st.data_editor(pd.DataFrame(columns=["RUTA", "CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_parcial")
         
         if archivo_parcial is not None:
             if st.button("▶️ Procesar Parcial", type="primary", key="btn_parcial"):
@@ -438,9 +438,9 @@ elif st.session_state.pagina_actual == "Mapeo":
         st.caption("Cargue 2 o más archivos simultáneamente.")
         archivos_completos = st.file_uploader("Cargue los archivos de ruteo (.xlsx)", type=["xlsx"], accept_multiple_files=True, key="up_completo", on_change=reset_completo)
         
-        # 🔴 ADELANTOS ANTES DEL BOTÓN
+        # 🔴 ADELANTOS ANTES DEL BOTÓN CON LA COLUMNA DE RUTA
         st.subheader("➕ Adelantos Manuales (Opcional)")
-        df_adelantos_completo = st.data_editor(pd.DataFrame(columns=["CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_completo")
+        df_adelantos_completo = st.data_editor(pd.DataFrame(columns=["RUTA", "CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_completo")
         
         if archivos_completos and len(archivos_completos) > 0:
             if st.button("▶️ Procesar Completo", type="primary", key="btn_completo"):
@@ -468,9 +468,9 @@ elif st.session_state.pagina_actual == "Mapeo":
         aplicar_tratamiento = st.checkbox("⚙️ Archivo Crudo (Eliminar 5 primeras filas y forzar separación por comas)", value=True, key="chk_tratamiento_3308")
         st.caption("Desmarque esta casilla si la base YA está limpia.")
         
-        # 🔴 ADELANTOS ANTES DEL BOTÓN
+        # 🔴 ADELANTOS ANTES DEL BOTÓN CON LA COLUMNA DE RUTA
         st.subheader("➕ Adelantos Manuales (Opcional)")
-        df_adelantos_3308 = st.data_editor(pd.DataFrame(columns=["CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_3308")
+        df_adelantos_3308 = st.data_editor(pd.DataFrame(columns=["RUTA", "CLIENTE", "CAMION"]), num_rows="dynamic", use_container_width=True, key="ad_3308")
         
         if archivo_3308 is not None:
             if st.button("▶️ Procesar 3308", type="primary", key="btn_3308"):
