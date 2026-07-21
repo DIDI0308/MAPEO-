@@ -105,6 +105,10 @@ def preparar_link_drive(url):
 URL_CLIENTES_ORIGINAL = "https://docs.google.com/spreadsheets/d/1zIllojDvh23QUOP8afJbxD66I5Ly6tgY/edit?usp=sharing&ouid=106121329840167757528&rtpof=true&sd=true"
 URL_CLIENTES = preparar_link_drive(URL_CLIENTES_ORIGINAL)
 
+# 🔴 NUEVO DRIVE DE CAMIONES
+URL_CAMIONES_ORIGINAL = "https://docs.google.com/spreadsheets/d/18bsymByHBshLc34kNFhfmhKPVhua7yjl/edit?usp=sharing&ouid=106121329840167757528&rtpof=true&sd=true"
+URL_CAMIONES = preparar_link_drive(URL_CAMIONES_ORIGINAL)
+
 @st.cache_data
 def cargar_base_clientes():
     return pd.read_excel(URL_CLIENTES, sheet_name="Clientes", usecols=["CLIID", "CLIDOM", "TELEFONO", "X", "Y"])
@@ -115,6 +119,14 @@ def cargar_estructura_camiones():
         return pd.read_excel(URL_CLIENTES, sheet_name="estructura_camiones", usecols="A:G", header=None)
     except Exception as e:
         st.error("No se pudo cargar la hoja 'estructura_camiones' del mapa base clientes.")
+        return pd.DataFrame()
+
+@st.cache_data
+def cargar_datos_camiones_info():
+    try:
+        return pd.read_excel(URL_CAMIONES, sheet_name="Hoja1", usecols="A:H")
+    except Exception as e:
+        st.error(f"No se pudo cargar la base de datos de camiones: {e}")
         return pd.DataFrame()
 
 def generar_imagen_tabla(df, titulo):
@@ -295,8 +307,8 @@ if st.session_state.pagina_actual == "Inicio":
         st.button("Ingresar a Mapeo", on_click=ir_a_pagina, args=("Mapeo",), use_container_width=True)
         
     with col2:
-        st.success("🛣️ **Módulo de Ruteo**")
-        st.write("Herramienta exclusiva para la planificación, organización y estructuración de la ruteabilidad operativa.")
+        st.success("🛣️ **Módulo de Ruteo Estratégico**")
+        st.write("Planificación de camiones según velocidad, restricciones de zonas (Ceja, Pirhua, JPII) y tipo de flota.")
         st.button("Ingresar a Ruteo", on_click=ir_a_pagina, args=("Ruteo",), use_container_width=True)
 
 
@@ -305,27 +317,83 @@ if st.session_state.pagina_actual == "Inicio":
 # ==========================================
 
 elif st.session_state.pagina_actual == "Ruteo":
-    st.sidebar.button("⬅️ Volver al Inicio", on_click=ir_a_pagina, args=("Inicio",), use_container_width=True)
+    # Botón Volver Arriba de Todo
+    st.button("⬅️ Volver al Menú Principal", on_click=ir_a_pagina, args=("Inicio",), use_container_width=True)
     
     st.title("🛣️ Módulo de Ruteo")
-    st.write("Bienvenido al módulo de ruteo. Aquí integraremos la nueva lógica de planificación de rutas.")
+    st.write("Consulta y validación de las características de cada unidad operativa.")
     
-    # Aquí irá tu futuro código para este módulo
-    st.info("Espacio reservado para la lógica de ruteo.")
-
+    df_camiones = cargar_datos_camiones_info()
+    
+    if not df_camiones.empty:
+        # Extraer lista de camiones limpiando datos
+        lista_camiones = df_camiones.iloc[:, 0].dropna().astype(str).tolist()
+        lista_camiones = sorted(list(set(lista_camiones)))
+        
+        camion_sel = st.selectbox("🔍 Seleccione la unidad (Código de Camión):", [""] + lista_camiones)
+        
+        if camion_sel:
+            st.markdown("---")
+            # Buscar el registro exacto
+            info = df_camiones[df_camiones.iloc[:, 0].astype(str) == camion_sel].iloc[0]
+            
+            # Formatear números a texto evitando '.0'
+            val_lento = str(info.iloc[1]).replace('.0', '').strip()
+            val_vuelta = str(info.iloc[2]).replace('.0', '').strip()
+            val_ceja = str(info.iloc[3]).replace('.0', '').strip()
+            val_pirhua = str(info.iloc[4]).replace('.0', '').strip()
+            val_jpii = str(info.iloc[5]).replace('.0', '').strip()
+            val_ol = str(info.iloc[6]).strip()
+            val_flota = str(info.iloc[7]).strip()
+            
+            # --- TRADUCCIÓN A LÓGICA DE NEGOCIO ---
+            text_lento = "⚠️ Sí (Evitar rutas dispersas o largas)" if val_lento == "1" else "✅ No (Ruta normal)"
+            text_vuelta = "⚡ Sí (Vehículo rápido)" if val_vuelta == "1" else "Normal"
+            
+            if val_ceja == "1": text_ceja = "✅ Sí va a la Ceja"
+            elif val_ceja == "2": text_ceja = "🚫 ¡NI LOCAS mandarlo a la Ceja!"
+            else: text_ceja = "❌ No va normalmente"
+            
+            text_pirhua = "✅ Sí" if val_pirhua == "1" else "❌ No"
+            text_jpii = "✅ Sí" if val_jpii == "1" else "❌ No"
+            
+            prioridad = "🔥 ALTA (Asignar primero)" if "fija" in val_flota.lower() else "⏳ BAJA (Asignar después)"
+            
+            # --- DISEÑO VISUAL ---
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.info("👤 **Datos Base**")
+                st.write(f"**Operador Logístico:** {val_ol}")
+                st.write(f"**Tipo de Flota:** {val_flota}")
+                st.write(f"**Prioridad de Asignación:** {prioridad}")
+                
+            with col2:
+                st.warning("⏱️ **Capacidad de Ruta**")
+                st.write(f"**Es Lento:** {text_lento}")
+                st.write(f"**Puede hacer 2 vueltas:** {text_vuelta}")
+                
+            with col3:
+                st.success("📍 **Restricciones de Zona**")
+                st.write(f"**La Ceja:** {text_ceja}")
+                st.write(f"**Partida Pirhua:** {text_pirhua}")
+                st.write(f"**Juan Pablo II:** {text_jpii}")
+                
+    else:
+        st.warning("Cargando la base de datos de camiones desde Drive...")
 
 # ==========================================
 # 🗺️ MÓDULO DE MAPEO (TODO LO ANTERIOR)
 # ==========================================
 
 elif st.session_state.pagina_actual == "Mapeo":
-    st.sidebar.button("⬅️ Volver al Inicio", on_click=ir_a_pagina, args=("Inicio",), use_container_width=True)
+    # Botón Volver Arriba de Todo
+    st.button("⬅️ Volver al Menú Principal", on_click=ir_a_pagina, args=("Inicio",), use_container_width=True)
     
-    st.title("Procesamiento de Ruteo y Generación de Mapas")
+    st.title("🗺️ Módulo de Mapeo y Base de Datos")
 
     col_head1, col_head2 = st.columns([3, 1])
     with col_head2:
-        if st.button("Actualizar Datos de Drive", use_container_width=True):
+        if st.button("🔄 Actualizar Datos de Drive", use_container_width=True):
             st.cache_data.clear()
 
     # --- ESTRUCTURACIÓN POR PESTAÑAS (MAPEO) ---
